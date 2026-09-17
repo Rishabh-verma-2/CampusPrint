@@ -1,74 +1,44 @@
-# 🖨️ CampusPrint
+# CampusPrint
 
-> **Campus-focused online printing platform** allowing students to upload documents from phone or laptop, select stationary vendors, choose print specifications, pay seamlessly, get a unique print pickup token & QR code, and collect without physical queues.
-
----
-
-## 🏗️ Architecture & Roles
-
-1. **Student Experience (Mobile-First PWA & Desktop)**
-   - 5-step print wizard: Upload PDF, select campus vendor, configure print settings (B&W/Color, single/duplex, page ranges, copies), live cost estimation, instant payment, and digital token issuance (`CP-XXXX` with live QR code).
-   - Real-time job timeline (Queued → Accepted → Printing → Ready for Pickup → Collected).
-   - Order history & PDF redownload.
-
-2. **Vendor / Stationery Dashboard**
-   - Live queue management with real-time Socket.IO synchronization.
-   - 1-click status transitions (Accept Job, Start Printing, Mark Ready).
-   - Pickup verification modal with token input & QR scanner validation.
-   - Live availability toggle (`OPEN`, `CLOSED`, `UNAVAILABLE`).
-   - Dynamic pricing management (per B&W page, per Color page, duplex discounts).
-   - Daily & weekly analytics with revenue charts and print volume breakdown.
-
-3. **Admin Dashboard**
-   - Global KPIs: Students, active vendors, revenue volume, active queue count.
-   - Vendor approval & suspension lifecycle.
-   - Comprehensive multi-campus & university hierarchy management.
-   - System audit logs and student complaint resolution.
+> **Smart, Queue-Free Printing for College and University Campuses**
 
 ---
 
-## 🚀 Getting Started
+## What We Offer
 
-### 1. Environment Configuration
+CampusPrint is a dedicated campus printing platform designed to eliminate traditional printing bottlenecks across university campuses. Instead of standing in long lines outside stationery shops or rushing right before submission deadlines, students can manage their entire printing process conveniently from their phone or laptop.
 
-In `server/.env`, enter your MongoDB connection string (leave blank or provide your local/Atlas URI):
-```env
-MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/campusprint
-```
-
-### 2. Seed Demo Data (Optional but Recommended)
-
-Once your `MONGO_URI` is in `server/.env`, seed default universities, vendors, admin, and demo student:
-```bash
-npm run seed
-```
-
-**Default Credentials after seeding:**
-- **Admin:** `admin@campusprint.com` / `CampusPrint@123`
-- **Vendor 1:** `vendor1@campusprint.com` / `CampusPrint@123` *(QuickPrint Express)*
-- **Vendor 2:** `vendor2@campusprint.com` / `CampusPrint@123` *(Apex Xerox)*
-- **Student:** `student@campusprint.com` / `CampusPrint@123` *(Aarav Gupta)*
-
-### 3. Run Development Servers
-
-Run backend and frontend:
-
-**Backend (Express + Socket.IO on port 5000):**
-```bash
-npm run dev:server
-```
-
-**Frontend (Vite + React + PWA on port 5173):**
-```bash
-npm run dev:client
-```
-
-Open your browser at `http://localhost:5173`.
-Vite is pre-configured to proxy `/api`, `/uploads`, and `/socket.io` directly to the backend.
+- **Instant Document Upload**: Upload assignments, project reports, lab manuals, or study notes directly from any smartphone or computer.
+- **Campus Store Selection**: Choose from verified on-campus and nearby print shops based on proximity and convenience.
+- **Precise Print Preferences**: Configure exact print requirements with complete clarity — Black & White or Color, single-sided or double-sided, custom page ranges, paper size, and number of copies.
+- **Digital Pickup Tokens**: Receive a unique order token (e.g., `CP-1042`) and secure QR code for every print request.
+- **Live Order Tracking**: Monitor the live status of your prints in real time — from queueing to printing to ready for pickup.
+- **Quick Counter Pickup**: Walk directly to the store counter, present your token, and collect your freshly printed documents without waiting in queues.
 
 ---
 
-## 🛠️ Tech Stack
+## How It Helps Students
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS v4, TanStack Query, React Router v7, Recharts, Lucide React, Sonner, React QR Code, Vite PWA.
-- **Backend:** Node.js, Express, TypeScript, Mongoose, Socket.IO, JWT + Refresh Cookies, Multer, Helmet, Rate Limiting, Zod.
+### 1. Eliminates Long Queues
+Peak hours, assignment submission mornings, and exam seasons often create chaotic crowds at campus printing shops. CampusPrint lets students send print jobs ahead of time and pick them up when they are ready.
+
+### 2. Protects Privacy & Digital Safety
+Students no longer need to carry USB pendrives or share personal files over public messaging apps at shared computers, preventing malware infections and safeguarding personal documents.
+
+### 3. Clear, Upfront Costing
+Complete pricing visibility before confirming an order ensures students know the exact cost per page without unexpected charges at the counter.
+
+### 4. Zero Miscommunication
+Verbal instructions given over a noisy counter often lead to mistakes — like unintended single-sided pages or accidental color prints. CampusPrint communicates exact digital settings directly to the printer.
+
+### 5. Organized Print History
+Access a neat, personal archive of all your academic prints, tokens, and documents in one clean dashboard.
+
+### 6. Dedicated Support & Assistance
+Students can raise issue tickets for print quality or store delays directly through the platform for prompt resolution.
+
+---
+
+## University Deployment
+
+CampusPrint is officially configured for **Parul University** (Main Campus, Vadodara, Gujarat), delivering seamless, organized printing services to students and faculty across campus.
