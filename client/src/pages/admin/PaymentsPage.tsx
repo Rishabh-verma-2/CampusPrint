@@ -47,8 +47,14 @@ const PaymentsPage: React.FC = () => {
         .then((r) => r.data.data),
   });
 
+  const { data: settingsData } = useQuery({
+    queryKey: ['adminSettings'],
+    queryFn: () => adminApi.getSettings().then((r) => r.data.data),
+  });
+
   const payments: PaymentItem[] = data?.payments || [];
   const total = data?.total ?? payments.length;
+  const platformFee = settingsData?.settings?.platformFee ?? 1;
 
   return (
     <div className="space-y-6 text-left animate-fade-in">
@@ -120,7 +126,7 @@ const PaymentsPage: React.FC = () => {
           <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
             Platform Convenience Fee
           </p>
-          <p className="text-2xl font-bold text-blue-600 mt-1">₹2.00 / order</p>
+          <p className="text-2xl font-bold text-blue-600 mt-1">₹{Number(platformFee).toFixed(2)} / order</p>
           <span className="text-[11px] text-slate-400">Configured baseline fee</span>
         </div>
         <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">

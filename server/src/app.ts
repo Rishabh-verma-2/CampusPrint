@@ -15,6 +15,7 @@ import printJobRoutes from './routes/printJobRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import adminRoutes from './routes/adminRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import { Settings, DEFAULT_SETTINGS } from './models/Settings';
 
 const app = express();
 
@@ -63,6 +64,42 @@ app.use('/api/print-jobs', printJobRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+
+// ─── Public Settings ──────────────────────────────────────────────────────────
+
+app.get('/api/settings', async (_req, res) => {
+  try {
+    const settingsDocs = await Settings.find().lean();
+    const settingsObj: Record<string, unknown> = { ...DEFAULT_SETTINGS };
+    for (const s of settingsDocs) {
+      settingsObj[s.key] = s.value;
+    }
+    const platformFee = Number(settingsObj.platformFee ?? settingsObj.PLATFORM_FEE ?? 2);
+    const maxFileSizeMb = Number(settingsObj.maxFileSizeMb ?? settingsObj.MAX_UPLOAD_SIZE_MB ?? 25);
+    const maxPagesLimit = Number(settingsObj.maxPagesLimit ?? settingsObj.MAX_PAGES ?? 200);
+    const orderExpiryHours = Number(settingsObj.orderExpiryHours ?? 48);
+    const reprintWindowHours = Number(settingsObj.reprintWindowHours ?? 24);
+
+    res.json({
+      success: true,
+      data: {
+        settings: {
+          ...settingsObj,
+          platformFee,
+          PLATFORM_FEE: platformFee,
+          maxFileSizeMb,
+          MAX_UPLOAD_SIZE_MB: maxFileSizeMb,
+          maxPagesLimit,
+          MAX_PAGES: maxPagesLimit,
+          orderExpiryHours,
+          reprintWindowHours,
+        },
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch settings' });
+  }
+});
 
 // ─── Health Check ──────────────────────────────────────────────────────────────
 

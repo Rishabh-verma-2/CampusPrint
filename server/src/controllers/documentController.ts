@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authenticate';
 import { asyncHandler, createError } from '../middleware/errorHandler';
 import { DocumentModel } from '../models/Document';
+import { Settings } from '../models/Settings';
 import { StorageService } from '../services/StorageService';
 import path from 'path';
 import fs from 'fs';
@@ -30,6 +31,37 @@ export const uploadDocument = asyncHandler(async (req: AuthRequest, res: Respons
 
   // Estimate page count
   const pageCount = estimatePdfPages(filePath);
+
+  // Check admin configured settings limits
+  const settingsDocs = await Settings.find({
+    key: { $in: ['MAX_UPLOAD_SIZE_MB', 'maxFileSizeMb', 'MAX_PAGES', 'maxPagesLimit'] },
+  }).lean();
+  const maxMb =
+    Number(
+      settingsDocs.find((s) => s.key === 'MAX_UPLOAD_SIZE_MB' || s.key === 'maxFileSizeMb')?.value
+    ) || 25;
+  const maxPages =
+    Number(
+      settingsDocs.find((s) => s.key === 'MAX_PAGES' || s.key === 'maxPagesLimit')?.value
+    ) || 200;
+
+  if (fileSize > maxMb * 1024 * 1024) {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    throw createError(
+      `File exceeds the maximum allowed upload size of ${maxMb}MB`,
+      400,
+      'FILE_TOO_LARGE'
+    );
+  }
+
+  if (pageCount > maxPages) {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    throw createError(
+      `Document has ${pageCount} pages, exceeding the maximum allowed limit of ${maxPages} pages`,
+      400,
+      'PAGE_LIMIT_EXCEEDED'
+    );
+  }
 
   // Upload to storage (local dev / cloudinary prod)
   const uploadResult = await StorageService.upload(filePath, originalName);

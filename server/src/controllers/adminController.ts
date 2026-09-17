@@ -674,10 +674,14 @@ export const getAdminAnalytics = asyncHandler(async (req: AuthRequest, res: Resp
   const repeatUsers = studentStats.filter((s) => s.jobsCount > 1).length;
   const jobsPerStudent = activeStudents > 0 ? (totalJobs / activeStudents).toFixed(1) : '0';
 
+  const feeDoc = await Settings.findOne({ key: { $in: ['platformFee', 'PLATFORM_FEE'] } }).lean();
+  const platformFee = feeDoc?.value !== undefined ? Number(feeDoc.value) : 2;
+
   res.json({
     success: true,
     data: {
       period,
+      platformFee,
       printActivity: {
         totalJobs,
         totalPages,
@@ -695,7 +699,7 @@ export const getAdminAnalytics = asyncHandler(async (req: AuthRequest, res: Resp
       revenue: {
         totalRevenue: 0,
         vendorEarnings: 0,
-        platformFees: 0,
+        platformFees: totalJobs * platformFee,
         note: 'Payments disabled currently',
       },
     },
@@ -734,7 +738,7 @@ export const getAuditLogs = asyncHandler(async (req: AuthRequest, res: Response)
 export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Response) => {
   const [settingsDocs, university] = await Promise.all([
     Settings.find().lean(),
-    University.findOne({ code: 'PU' }) || await University.findOne(),
+    University.findOne({ code: 'PU' }) || (await University.findOne()),
   ]);
 
   const settingsObj: Record<string, unknown> = { ...DEFAULT_SETTINGS };
@@ -742,10 +746,30 @@ export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Resp
     settingsObj[s.key] = s.value;
   }
 
+  const platformFee = Number(settingsObj.platformFee ?? settingsObj.PLATFORM_FEE ?? 2);
+  const maxFileSizeMb = Number(settingsObj.maxFileSizeMb ?? settingsObj.MAX_UPLOAD_SIZE_MB ?? 25);
+  const maxPagesLimit = Number(settingsObj.maxPagesLimit ?? settingsObj.MAX_PAGES ?? 200);
+  const orderExpiryHours = Number(settingsObj.orderExpiryHours ?? 48);
+  const reprintWindowHours = Number(settingsObj.reprintWindowHours ?? 24);
+  const supportEmail = String(settingsObj.supportEmail ?? 'support@campusprint.in');
+
+  const unifiedSettings = {
+    ...settingsObj,
+    platformFee,
+    PLATFORM_FEE: platformFee,
+    maxFileSizeMb,
+    MAX_UPLOAD_SIZE_MB: maxFileSizeMb,
+    maxPagesLimit,
+    MAX_PAGES: maxPagesLimit,
+    orderExpiryHours,
+    reprintWindowHours,
+    supportEmail,
+  };
+
   res.json({
     success: true,
     data: {
-      settings: settingsObj,
+      settings: unifiedSettings,
       university: {
         name: university?.name || 'Parul University',
         code: university?.code || 'PU',
@@ -758,7 +782,21 @@ export const getAdminSettings = asyncHandler(async (_req: AuthRequest, res: Resp
 export const updateAdminSettings = asyncHandler(async (req: AuthRequest, res: Response) => {
   const updates = req.body;
 
-  for (const [key, value] of Object.entries(updates)) {
+  const normalizedUpdates: Record<string, unknown> = { ...updates };
+  if (updates.platformFee !== undefined) {
+    normalizedUpdates.PLATFORM_FEE = Number(updates.platformFee);
+    normalizedUpdates.platformFee = Number(updates.platformFee);
+  }
+  if (updates.maxFileSizeMb !== undefined) {
+    normalizedUpdates.MAX_UPLOAD_SIZE_MB = Number(updates.maxFileSizeMb);
+    normalizedUpdates.maxFileSizeMb = Number(updates.maxFileSizeMb);
+  }
+  if (updates.maxPagesLimit !== undefined) {
+    normalizedUpdates.MAX_PAGES = Number(updates.maxPagesLimit);
+    normalizedUpdates.maxPagesLimit = Number(updates.maxPagesLimit);
+  }
+
+  for (const [key, value] of Object.entries(normalizedUpdates)) {
     await Settings.findOneAndUpdate(
       { key },
       { key, value },

@@ -57,6 +57,10 @@ const SettingsPage: React.FC = () => {
     mutationFn: (values: Record<string, unknown>) => adminApi.updateSettings(values),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['adminSettings'] });
+      queryClient.invalidateQueries({ queryKey: ['adminAnalytics'] });
+      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['adminPayments'] });
+      queryClient.invalidateQueries({ queryKey: ['publicSettings'] });
       toast.success('Platform configuration saved successfully');
     },
     onError: (err: any) => {

@@ -48,6 +48,7 @@ const AnalyticsPage: React.FC = () => {
 
   const vendorPerformance = data?.vendorPerformance || [];
   const statusDistribution = data?.statusDistribution || [];
+  const platformFee = data?.platformFee ?? 1;
 
   const bwPercentage =
     printActivity.totalPages > 0
@@ -168,10 +169,10 @@ const AnalyticsPage: React.FC = () => {
                 <CreditCard size={16} className="text-amber-600" />
               </div>
               <p className="text-2xl font-bold text-slate-900 mt-2">
-                ₹{printActivity.totalJobs * 2}
+                ₹{(printActivity.totalJobs * platformFee).toFixed(0)}
               </p>
               <span className="text-[11px] text-slate-400">
-                At ₹2 base convenience fee
+                At ₹{platformFee} base convenience fee
               </span>
             </div>
           </div>

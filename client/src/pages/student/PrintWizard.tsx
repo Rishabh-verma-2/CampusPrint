@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { documentApi } from '../../api/documentApi';
 import { vendorApi } from '../../api/vendorApi';
 import { printJobApi } from '../../api/printJobApi';
+import apiClient from '../../api/apiClient';
 import { useAuth } from '../../context/AuthContext';
 import { AvailabilityBadge, Spinner } from '../../components/ui';
 import type { DocumentFile, Vendor, PrintJob, ColorMode, SidesMode } from '../../types';
@@ -85,7 +86,16 @@ const PrintWizardPage: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
+  const { data: publicSettings } = useQuery({
+    queryKey: ['publicSettings'],
+    queryFn: () => apiClient.get('/settings').then((res) => res.data.data.settings),
+    staleTime: 30 * 1000,
+  });
+
   const vendors: Vendor[] = vendorsData || [];
+  const dynamicPlatformFee = publicSettings?.platformFee ?? 2;
+  const maxFileSizeMb = publicSettings?.maxFileSizeMb ?? 25;
+  const maxPagesLimit = publicSettings?.maxPagesLimit ?? 200;
 
   // ─── Document Upload Handlers ────────────────────────────────────────────────
   const processFiles = async (files: FileList | File[]) => {
@@ -97,8 +107,8 @@ const PrintWizardPage: React.FC = () => {
         toast.error(`"${f.name}" is not a PDF file. Only PDFs are supported.`);
         continue;
       }
-      if (f.size > 20 * 1024 * 1024) {
-        toast.error(`"${f.name}" exceeds 20MB limit.`);
+      if (f.size > maxFileSizeMb * 1024 * 1024) {
+        toast.error(`"${f.name}" exceeds ${maxFileSizeMb}MB limit.`);
         continue;
       }
       validFiles.push(f);
@@ -197,7 +207,7 @@ const PrintWizardPage: React.FC = () => {
     : 2;
 
   const subtotal = totalSheets * ratePerPage;
-  const platformFee = 2;
+  const platformFee = dynamicPlatformFee;
   const estimatedTotal = subtotal + platformFee;
 
   // ─── Submission Handler ─────────────────────────────────────────────────────

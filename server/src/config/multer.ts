@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { env } from '../config/env';
 
 const ALLOWED_TYPES = ['application/pdf'];
-const MAX_SIZE_MB = 20;
+const MAX_SIZE_MB = 100;
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {

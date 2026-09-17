@@ -19,6 +19,7 @@ const printJobRoutes_1 = __importDefault(require("./routes/printJobRoutes"));
 const paymentRoutes_1 = __importDefault(require("./routes/paymentRoutes"));
 const adminRoutes_1 = __importDefault(require("./routes/adminRoutes"));
 const notificationRoutes_1 = __importDefault(require("./routes/notificationRoutes"));
+const Settings_1 = require("./models/Settings");
 const app = (0, express_1.default)();
 // ─── Security ─────────────────────────────────────────────────────────────────
 app.use((0, helmet_1.default)({
@@ -49,6 +50,40 @@ app.use('/api/print-jobs', printJobRoutes_1.default);
 app.use('/api/payments', paymentRoutes_1.default);
 app.use('/api/admin', adminRoutes_1.default);
 app.use('/api/notifications', notificationRoutes_1.default);
+// ─── Public Settings ──────────────────────────────────────────────────────────
+app.get('/api/settings', async (_req, res) => {
+    try {
+        const settingsDocs = await Settings_1.Settings.find().lean();
+        const settingsObj = { ...Settings_1.DEFAULT_SETTINGS };
+        for (const s of settingsDocs) {
+            settingsObj[s.key] = s.value;
+        }
+        const platformFee = Number(settingsObj.platformFee ?? settingsObj.PLATFORM_FEE ?? 2);
+        const maxFileSizeMb = Number(settingsObj.maxFileSizeMb ?? settingsObj.MAX_UPLOAD_SIZE_MB ?? 25);
+        const maxPagesLimit = Number(settingsObj.maxPagesLimit ?? settingsObj.MAX_PAGES ?? 200);
+        const orderExpiryHours = Number(settingsObj.orderExpiryHours ?? 48);
+        const reprintWindowHours = Number(settingsObj.reprintWindowHours ?? 24);
+        res.json({
+            success: true,
+            data: {
+                settings: {
+                    ...settingsObj,
+                    platformFee,
+                    PLATFORM_FEE: platformFee,
+                    maxFileSizeMb,
+                    MAX_UPLOAD_SIZE_MB: maxFileSizeMb,
+                    maxPagesLimit,
+                    MAX_PAGES: maxPagesLimit,
+                    orderExpiryHours,
+                    reprintWindowHours,
+                },
+            },
+        });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to fetch settings' });
+    }
+});
 // ─── Health Check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
     res.json({ success: true, message: 'CampusPrint API running', timestamp: new Date().toISOString() });

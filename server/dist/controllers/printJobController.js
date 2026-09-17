@@ -7,6 +7,7 @@ const Document_1 = require("../models/Document");
 const PrintJob_1 = require("../models/PrintJob");
 const User_1 = require("../models/User");
 const StudentProfile_1 = require("../models/StudentProfile");
+const Settings_1 = require("../models/Settings");
 const StorageService_1 = require("../services/StorageService");
 const PricingService_1 = require("../services/PricingService");
 const PrintJobStateMachine_1 = require("../services/PrintJobStateMachine");
@@ -62,7 +63,9 @@ exports.createPrintJob = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         colorPerPage: vendor.pricing.colorPerPage,
         duplexDiscount: vendor.pricing.duplexDiscount,
     };
-    const pricing = PricingService_1.PricingService.calculate(configWithPages, priceSnapshot, totalPages);
+    const feeDoc = await Settings_1.Settings.findOne({ key: { $in: ['platformFee', 'PLATFORM_FEE'] } }).lean();
+    const platformFee = feeDoc?.value !== undefined ? Number(feeDoc.value) : 2;
+    const pricing = PricingService_1.PricingService.calculate(configWithPages, priceSnapshot, totalPages, platformFee);
     const publicToken = await TokenService_1.TokenService.generateUniqueToken();
     const student = await User_1.User.findById(req.user._id);
     const studentProfile = await StudentProfile_1.StudentProfile.findOne({ userId: req.user._id });

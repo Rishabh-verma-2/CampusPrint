@@ -7,6 +7,7 @@ import { PrintJob } from '../models/PrintJob';
 import { Payment } from '../models/Payment';
 import { User } from '../models/User';
 import { StudentProfile } from '../models/StudentProfile';
+import { Settings } from '../models/Settings';
 import { StorageService } from '../services/StorageService';
 import { PricingService, parsePageRanges } from '../services/PricingService';
 import { PrintJobStateMachine } from '../services/PrintJobStateMachine';
@@ -72,7 +73,10 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
     duplexDiscount: vendor.pricing.duplexDiscount,
   };
 
-  const pricing = PricingService.calculate(configWithPages, priceSnapshot, totalPages);
+  const feeDoc = await Settings.findOne({ key: { $in: ['platformFee', 'PLATFORM_FEE'] } }).lean();
+  const platformFee = feeDoc?.value !== undefined ? Number(feeDoc.value) : 2;
+
+  const pricing = PricingService.calculate(configWithPages, priceSnapshot, totalPages, platformFee);
   const publicToken = await TokenService.generateUniqueToken();
 
   const student = await User.findById(req.user!._id);

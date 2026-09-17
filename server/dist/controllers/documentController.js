@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteDocument = exports.getDocument = exports.uploadDocument = void 0;
 const errorHandler_1 = require("../middleware/errorHandler");
 const Document_1 = require("../models/Document");
+const Settings_1 = require("../models/Settings");
 const StorageService_1 = require("../services/StorageService");
 const fs_1 = __importDefault(require("fs"));
 // Estimate PDF page count from file buffer (basic approach)
@@ -30,6 +31,26 @@ exports.uploadDocument = (0, errorHandler_1.asyncHandler)(async (req, res) => {
     const mimeType = req.file.mimetype;
     // Estimate page count
     const pageCount = estimatePdfPages(filePath);
+    // Check admin configured settings limits
+    const settingsDocs = await Settings_1.Settings.find({
+        key: { $in: ['MAX_UPLOAD_SIZE_MB', 'maxFileSizeMb', 'MAX_PAGES', 'maxPagesLimit'] },
+    }).lean();
+    const maxMb = Number(settingsDocs.find((s) => s.key === 'MAX_UPLOAD_SIZE_MB' || s.key === 'maxFileSizeMb')?.value) || 25;
+    const maxPages = Number(settingsDocs.find((s) => s.key === 'MAX_PAGES' || s.key === 'maxPagesLimit')?.value) || 200;
+    if (fileSize > maxMb * 1024 * 1024) {
+        try {
+            fs_1.default.unlinkSync(filePath);
+        }
+        catch (_) { }
+        throw (0, errorHandler_1.createError)(`File exceeds the maximum allowed upload size of ${maxMb}MB`, 400, 'FILE_TOO_LARGE');
+    }
+    if (pageCount > maxPages) {
+        try {
+            fs_1.default.unlinkSync(filePath);
+        }
+        catch (_) { }
+        throw (0, errorHandler_1.createError)(`Document has ${pageCount} pages, exceeding the maximum allowed limit of ${maxPages} pages`, 400, 'PAGE_LIMIT_EXCEEDED');
+    }
     // Upload to storage (local dev / cloudinary prod)
     const uploadResult = await StorageService_1.StorageService.upload(filePath, originalName);
     // Save document record
