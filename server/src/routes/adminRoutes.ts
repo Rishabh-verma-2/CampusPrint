@@ -8,6 +8,7 @@ import {
   getCampuses,
   createCampus,
   getAdminVendors,
+  createVendor,
   updateVendorStatus,
   approveVendor,
   suspendVendor,
@@ -42,6 +43,7 @@ router.post('/campuses', createCampus);
 
 // Vendors
 router.get('/vendors', getAdminVendors);
+router.post('/vendors', createVendor);
 router.patch('/vendors/:id/status', updateVendorStatus);
 router.post('/vendors/:id/approve', approveVendor);
 router.post('/vendors/:id/suspend', suspendVendor);

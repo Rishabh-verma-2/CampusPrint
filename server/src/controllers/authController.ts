@@ -3,12 +3,14 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models/User';
 import { StudentProfile } from '../models/StudentProfile';
+import { University } from '../models/University';
+import { Campus } from '../models/Campus';
 import { env } from '../config/env';
 import { asyncHandler, createError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/authenticate';
 
-const generateTokens = (userId: string, role: string, email: string) => {
-  const accessToken = jwt.sign({ _id: userId, role, email }, env.JWT_SECRET, {
+const generateTokens = (userId: string, role: string, email?: string) => {
+  const accessToken = jwt.sign({ _id: userId, role, email: email || '' }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as any,
   });
   const refreshToken = jwt.sign({ _id: userId }, env.JWT_REFRESH_SECRET, {
@@ -174,18 +176,21 @@ export const studentQuickAccess = asyncHandler(async (req: AuthRequest, res: Res
     throw createError('Full name is required for first-time students', 400, 'NAME_REQUIRED');
   }
 
-  const safeSlug = digitsOnly || cleanIdentifier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || Date.now().toString();
-  const syntheticEmail = `student_${safeSlug}_${Math.floor(1000 + Math.random() * 9000)}@campusprint.internal`;
+  const [parulUni, parulCampus] = await Promise.all([
+    University.findOne({ code: 'PU' }) || (await University.findOne()),
+    Campus.findOne(),
+  ]);
 
   // Save according to digit count:
   // 10 digits -> saved as mobile number (phone)
   // 13 digits -> saved as enrollment number
   const newUser = await User.create({
     name: studentName,
-    email: syntheticEmail,
     phone: isPhone ? `+91${digitsOnly}` : undefined,
     enrollmentNumber: isEnrollment ? digitsOnly : undefined,
     role: 'STUDENT',
+    universityId: parulUni?._id,
+    campusId: parulCampus?._id,
   });
 
   await StudentProfile.create({
@@ -203,7 +208,7 @@ export const studentQuickAccess = asyncHandler(async (req: AuthRequest, res: Res
       user: {
         _id: newUser._id,
         name: newUser.name,
-        email: newUser.email,
+        email: newUser.email || '',
         phone: newUser.phone || '',
         enrollmentNumber: newUser.enrollmentNumber || '',
         role: newUser.role,

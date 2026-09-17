@@ -17,6 +17,8 @@ export const adminApi = {
   // Vendors
   getVendors: (params?: { status?: string; search?: string; page?: number; limit?: number }) =>
     apiClient.get('/admin/vendors', { params }),
+  createVendor: (data: Record<string, unknown>) =>
+    apiClient.post('/admin/vendors', data),
   updateVendorStatus: (id: string, status: string) =>
     apiClient.patch(`/admin/vendors/${id}/status`, { status }),
   approveVendor: (id: string) => apiClient.post(`/admin/vendors/${id}/approve`),

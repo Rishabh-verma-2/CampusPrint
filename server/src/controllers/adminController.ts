@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import bcrypt from 'bcryptjs';
 import { AuthRequest } from '../middleware/authenticate';
 import { asyncHandler, createError } from '../middleware/errorHandler';
 import { User } from '../models/User';
@@ -319,6 +320,97 @@ export const suspendVendor = asyncHandler(async (req: AuthRequest, res: Response
   if (!vendor) throw createError('Vendor not found', 404, 'VENDOR_NOT_FOUND');
   await logAction(req.user!._id, 'ADMIN_DEACTIVATED_VENDOR', 'Vendor', req.params.id as string, { shopName: vendor.shopName, reason: req.body.reason });
   res.json({ success: true, data: { vendor } });
+});
+
+export const createVendor = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const {
+    shopName,
+    ownerName,
+    phone,
+    email,
+    address,
+    bwPerPage = 1.5,
+    colorPerPage = 5.0,
+    duplexDiscount = 0,
+    openTime = '08:30',
+    closeTime = '20:00',
+  } = req.body;
+
+  if (!shopName || !ownerName || !phone || !address) {
+    throw createError('Shop name, owner name, phone number, and campus location are required', 400, 'FIELDS_REQUIRED');
+  }
+
+  // Get Parul University & Campus
+  const [university, campus] = await Promise.all([
+    University.findOne({ code: 'PU' }) || (await University.findOne()),
+    Campus.findOne({ name: { $regex: 'Main Campus', $options: 'i' } }) || (await Campus.findOne()),
+  ]);
+
+  if (!university || !campus) {
+    throw createError('University or campus configuration missing', 500, 'CONFIG_ERROR');
+  }
+
+  const vendorPhone = phone.trim();
+  const vendorEmail = email && email.trim() ? email.trim().toLowerCase() : `vendor_${Date.now()}@parul.campusprint.in`;
+
+  // Check if user already exists
+  let vendorUser = await User.findOne({ $or: [{ email: vendorEmail }, { phone: vendorPhone }] });
+  if (!vendorUser) {
+    const saltRounds = 10;
+    const defaultPasswordHash = await bcrypt.hash('Vendor@CampusPrint2026!', saltRounds);
+    vendorUser = await User.create({
+      name: ownerName.trim(),
+      email: vendorEmail,
+      phone: vendorPhone,
+      passwordHash: defaultPasswordHash,
+      role: 'VENDOR',
+      universityId: university._id,
+      campusId: campus._id,
+      isActive: true,
+    });
+  }
+
+  // Check if vendor already exists for this user
+  const existingVendor = await Vendor.findOne({ userId: vendorUser._id });
+  if (existingVendor) {
+    throw createError('A vendor store is already registered for this user/phone', 400, 'VENDOR_EXISTS');
+  }
+
+  const vendor = await Vendor.create({
+    userId: vendorUser._id,
+    shopName: shopName.trim(),
+    ownerName: ownerName.trim(),
+    phone: vendorPhone,
+    address: address.trim(),
+    universityId: university._id,
+    campusId: campus._id,
+    status: 'ACTIVE',
+    availability: 'OPEN',
+    pricing: {
+      bwPerPage: Number(bwPerPage) || 1.5,
+      colorPerPage: Number(colorPerPage) || 5.0,
+      duplexDiscount: Number(duplexDiscount) || 0,
+    },
+    operatingHours: {
+      open: openTime || '08:30',
+      close: closeTime || '20:00',
+      days: [1, 2, 3, 4, 5, 6],
+    },
+    isActive: true,
+  });
+
+  await logAction(req.user!._id, 'ADMIN_CREATED_VENDOR', 'Vendor', vendor._id.toString(), {
+    shopName: vendor.shopName,
+    ownerName: vendor.ownerName,
+    status: vendor.status,
+    availability: vendor.availability,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: { vendor },
+    message: 'Vendor store generated and activated successfully',
+  });
 });
 
 // ─── 4. Students Management ───────────────────────────────────────────────────

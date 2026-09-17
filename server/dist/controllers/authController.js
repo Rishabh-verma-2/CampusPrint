@@ -8,10 +8,12 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = require("../models/User");
 const StudentProfile_1 = require("../models/StudentProfile");
+const University_1 = require("../models/University");
+const Campus_1 = require("../models/Campus");
 const env_1 = require("../config/env");
 const errorHandler_1 = require("../middleware/errorHandler");
 const generateTokens = (userId, role, email) => {
-    const accessToken = jsonwebtoken_1.default.sign({ _id: userId, role, email }, env_1.env.JWT_SECRET, {
+    const accessToken = jsonwebtoken_1.default.sign({ _id: userId, role, email: email || '' }, env_1.env.JWT_SECRET, {
         expiresIn: env_1.env.JWT_EXPIRES_IN,
     });
     const refreshToken = jsonwebtoken_1.default.sign({ _id: userId }, env_1.env.JWT_REFRESH_SECRET, {
@@ -151,17 +153,20 @@ exports.studentQuickAccess = (0, errorHandler_1.asyncHandler)(async (req, res) =
     if (!studentName || studentName.length < 2) {
         throw (0, errorHandler_1.createError)('Full name is required for first-time students', 400, 'NAME_REQUIRED');
     }
-    const safeSlug = digitsOnly || cleanIdentifier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || Date.now().toString();
-    const syntheticEmail = `student_${safeSlug}_${Math.floor(1000 + Math.random() * 9000)}@campusprint.internal`;
+    const [parulUni, parulCampus] = await Promise.all([
+        University_1.University.findOne({ code: 'PU' }) || (await University_1.University.findOne()),
+        Campus_1.Campus.findOne(),
+    ]);
     // Save according to digit count:
     // 10 digits -> saved as mobile number (phone)
     // 13 digits -> saved as enrollment number
     const newUser = await User_1.User.create({
         name: studentName,
-        email: syntheticEmail,
         phone: isPhone ? `+91${digitsOnly}` : undefined,
         enrollmentNumber: isEnrollment ? digitsOnly : undefined,
         role: 'STUDENT',
+        universityId: parulUni?._id,
+        campusId: parulCampus?._id,
     });
     await StudentProfile_1.StudentProfile.create({
         userId: newUser._id,
@@ -176,7 +181,7 @@ exports.studentQuickAccess = (0, errorHandler_1.asyncHandler)(async (req, res) =
             user: {
                 _id: newUser._id,
                 name: newUser.name,
-                email: newUser.email,
+                email: newUser.email || '',
                 phone: newUser.phone || '',
                 enrollmentNumber: newUser.enrollmentNumber || '',
                 role: newUser.role,

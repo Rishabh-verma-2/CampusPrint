@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateAdminSettings = exports.getAdminSettings = exports.getAuditLogs = exports.getAdminAnalytics = exports.updateComplaint = exports.getComplaints = exports.getAdminPayments = exports.getAdminOrderById = exports.getAdminOrders = exports.deactivateUser = exports.getStudentDetails = exports.getUsers = exports.suspendVendor = exports.approveVendor = exports.updateVendorStatus = exports.getAdminVendors = exports.createCampus = exports.getCampuses = exports.createUniversity = exports.getUniversityById = exports.getUniversities = exports.getAdminDashboard = void 0;
+exports.updateAdminSettings = exports.getAdminSettings = exports.getAuditLogs = exports.getAdminAnalytics = exports.updateComplaint = exports.getComplaints = exports.getAdminPayments = exports.getAdminOrderById = exports.getAdminOrders = exports.deactivateUser = exports.getStudentDetails = exports.getUsers = exports.createVendor = exports.suspendVendor = exports.approveVendor = exports.updateVendorStatus = exports.getAdminVendors = exports.createCampus = exports.getCampuses = exports.createUniversity = exports.getUniversityById = exports.getUniversities = exports.getAdminDashboard = void 0;
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const User_1 = require("../models/User");
 const Vendor_1 = require("../models/Vendor");
@@ -258,6 +262,76 @@ exports.suspendVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         throw (0, errorHandler_1.createError)('Vendor not found', 404, 'VENDOR_NOT_FOUND');
     await logAction(req.user._id, 'ADMIN_DEACTIVATED_VENDOR', 'Vendor', req.params.id, { shopName: vendor.shopName, reason: req.body.reason });
     res.json({ success: true, data: { vendor } });
+});
+exports.createVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { shopName, ownerName, phone, email, address, bwPerPage = 1.5, colorPerPage = 5.0, duplexDiscount = 0, openTime = '08:30', closeTime = '20:00', } = req.body;
+    if (!shopName || !ownerName || !phone || !address) {
+        throw (0, errorHandler_1.createError)('Shop name, owner name, phone number, and campus location are required', 400, 'FIELDS_REQUIRED');
+    }
+    // Get Parul University & Campus
+    const [university, campus] = await Promise.all([
+        University_1.University.findOne({ code: 'PU' }) || (await University_1.University.findOne()),
+        Campus_1.Campus.findOne({ name: { $regex: 'Main Campus', $options: 'i' } }) || (await Campus_1.Campus.findOne()),
+    ]);
+    if (!university || !campus) {
+        throw (0, errorHandler_1.createError)('University or campus configuration missing', 500, 'CONFIG_ERROR');
+    }
+    const vendorPhone = phone.trim();
+    const vendorEmail = email && email.trim() ? email.trim().toLowerCase() : `vendor_${Date.now()}@parul.campusprint.in`;
+    // Check if user already exists
+    let vendorUser = await User_1.User.findOne({ $or: [{ email: vendorEmail }, { phone: vendorPhone }] });
+    if (!vendorUser) {
+        const saltRounds = 10;
+        const defaultPasswordHash = await bcryptjs_1.default.hash('Vendor@CampusPrint2026!', saltRounds);
+        vendorUser = await User_1.User.create({
+            name: ownerName.trim(),
+            email: vendorEmail,
+            phone: vendorPhone,
+            passwordHash: defaultPasswordHash,
+            role: 'VENDOR',
+            universityId: university._id,
+            campusId: campus._id,
+            isActive: true,
+        });
+    }
+    // Check if vendor already exists for this user
+    const existingVendor = await Vendor_1.Vendor.findOne({ userId: vendorUser._id });
+    if (existingVendor) {
+        throw (0, errorHandler_1.createError)('A vendor store is already registered for this user/phone', 400, 'VENDOR_EXISTS');
+    }
+    const vendor = await Vendor_1.Vendor.create({
+        userId: vendorUser._id,
+        shopName: shopName.trim(),
+        ownerName: ownerName.trim(),
+        phone: vendorPhone,
+        address: address.trim(),
+        universityId: university._id,
+        campusId: campus._id,
+        status: 'ACTIVE',
+        availability: 'OPEN',
+        pricing: {
+            bwPerPage: Number(bwPerPage) || 1.5,
+            colorPerPage: Number(colorPerPage) || 5.0,
+            duplexDiscount: Number(duplexDiscount) || 0,
+        },
+        operatingHours: {
+            open: openTime || '08:30',
+            close: closeTime || '20:00',
+            days: [1, 2, 3, 4, 5, 6],
+        },
+        isActive: true,
+    });
+    await logAction(req.user._id, 'ADMIN_CREATED_VENDOR', 'Vendor', vendor._id.toString(), {
+        shopName: vendor.shopName,
+        ownerName: vendor.ownerName,
+        status: vendor.status,
+        availability: vendor.availability,
+    });
+    res.status(201).json({
+        success: true,
+        data: { vendor },
+        message: 'Vendor store generated and activated successfully',
+    });
 });
 // ─── 4. Students Management ───────────────────────────────────────────────────
 exports.getUsers = (0, errorHandler_1.asyncHandler)(async (req, res) => {

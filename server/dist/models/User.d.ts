@@ -2,7 +2,7 @@ import mongoose, { Document } from 'mongoose';
 import { UserRole } from '../types';
 export interface IUser extends Document {
     name: string;
-    email: string;
+    email?: string;
     phone?: string;
     enrollmentNumber?: string;
     passwordHash?: string;

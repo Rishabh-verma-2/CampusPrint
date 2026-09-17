@@ -107,8 +107,8 @@ const StudentLayout: React.FC = () => {
                     <p className="text-xs font-bold text-slate-900 truncate">
                       {user?.name ?? 'Student'}
                     </p>
-                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                      {user?.enrollmentNumber || user?.phone || user?.email}
+                    <p className="text-[11px] text-slate-500 font-mono truncate mt-0.5">
+                      {user?.enrollmentNumber || user?.phone || (user?.email && !user.email.endsWith('@campusprint.internal') ? user.email : 'Parul University')}
                     </p>
                   </div>
 

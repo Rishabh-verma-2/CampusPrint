@@ -16,6 +16,7 @@ router.get('/campuses', adminController_1.getCampuses);
 router.post('/campuses', adminController_1.createCampus);
 // Vendors
 router.get('/vendors', adminController_1.getAdminVendors);
+router.post('/vendors', adminController_1.createVendor);
 router.patch('/vendors/:id/status', adminController_1.updateVendorStatus);
 router.post('/vendors/:id/approve', adminController_1.approveVendor);
 router.post('/vendors/:id/suspend', adminController_1.suspendVendor);

@@ -218,7 +218,11 @@ const StudentsPage: React.FC = () => {
                           </div>
                           <div>
                             <div className="font-semibold text-slate-900">{student.name}</div>
-                            <div className="text-[11px] text-slate-400">{student.email}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              {student.email && !student.email.endsWith('@campusprint.internal')
+                                ? student.email
+                                : student.enrollmentNumber || student.phone || 'Parul University'}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -356,7 +360,11 @@ const StudentsPage: React.FC = () => {
                         <h4 className="text-sm font-bold text-slate-900 truncate">
                           {selectedStudent.name}
                         </h4>
-                        <p className="text-xs text-slate-500 truncate">{selectedStudent.email}</p>
+                        <p className="text-xs text-slate-500 font-mono truncate">
+                          {selectedStudent.email && !selectedStudent.email.endsWith('@campusprint.internal')
+                            ? selectedStudent.email
+                            : selectedStudent.enrollmentNumber || selectedStudent.phone || 'Parul University'}
+                        </p>
                         <span
                           className={`inline-flex items-center px-2 py-0.2 rounded-full text-[10px] font-medium mt-1 ${
                             selectedStudent.isActive !== false
@@ -422,14 +430,16 @@ const StudentsPage: React.FC = () => {
                             {selectedStudent.phone || '—'}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-500 flex items-center gap-1.5">
-                            <Mail size={13} /> Email
-                          </span>
-                          <span className="text-slate-900 truncate max-w-[200px]">
-                            {selectedStudent.email}
-                          </span>
-                        </div>
+                        {selectedStudent.email && !selectedStudent.email.endsWith('@campusprint.internal') && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 flex items-center gap-1.5">
+                              <Mail size={13} /> Email
+                            </span>
+                            <span className="text-slate-900 truncate max-w-[200px]">
+                              {selectedStudent.email}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between">
                           <span className="text-slate-500 flex items-center gap-1.5">
                             <Calendar size={13} /> Registration Date

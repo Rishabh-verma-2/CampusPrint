@@ -8,7 +8,7 @@ export interface AuthRequest extends Request {
   user?: {
     _id: string;
     role: UserRole;
-    email: string;
+    email?: string;
   };
 }
 
@@ -28,7 +28,7 @@ export const authenticate = async (
     const decoded = jwt.verify(token, env.JWT_SECRET) as {
       _id: string;
       role: UserRole;
-      email: string;
+      email?: string;
     };
 
     // Verify user still exists and is active
