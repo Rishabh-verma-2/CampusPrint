@@ -1,0 +1,298 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.refresh = exports.getMe = exports.logout = exports.login = exports.studentQuickAccess = exports.register = void 0;
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const User_1 = require("../models/User");
+const StudentProfile_1 = require("../models/StudentProfile");
+const env_1 = require("../config/env");
+const errorHandler_1 = require("../middleware/errorHandler");
+const generateTokens = (userId, role, email) => {
+    const accessToken = jsonwebtoken_1.default.sign({ _id: userId, role, email }, env_1.env.JWT_SECRET, {
+        expiresIn: env_1.env.JWT_EXPIRES_IN,
+    });
+    const refreshToken = jsonwebtoken_1.default.sign({ _id: userId }, env_1.env.JWT_REFRESH_SECRET, {
+        expiresIn: env_1.env.JWT_REFRESH_EXPIRES_IN,
+    });
+    return { accessToken, refreshToken };
+};
+const setTokenCookies = (res, accessToken, refreshToken) => {
+    res.cookie('accessToken', accessToken, {
+        httpOnly: true,
+        secure: env_1.env.isProd(),
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: env_1.env.isProd(),
+        sameSite: 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    });
+};
+exports.register = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { name, email, phone, password, role, studentId, department, year } = req.body;
+    const existingUser = await User_1.User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+        throw (0, errorHandler_1.createError)('Email already registered', 409, 'EMAIL_EXISTS');
+    }
+    const saltRounds = 12;
+    const passwordHash = await bcryptjs_1.default.hash(password, saltRounds);
+    const user = await User_1.User.create({
+        name,
+        email: email.toLowerCase(),
+        phone,
+        passwordHash,
+        role: role || 'STUDENT',
+    });
+    // Create student profile if registering as student
+    if ((role || 'STUDENT') === 'STUDENT' && studentId) {
+        await StudentProfile_1.StudentProfile.create({
+            userId: user._id,
+            studentId,
+            department,
+            year,
+        });
+    }
+    const { accessToken, refreshToken } = generateTokens(user._id.toString(), user.role, user.email);
+    await User_1.User.findByIdAndUpdate(user._id, { refreshToken });
+    setTokenCookies(res, accessToken, refreshToken);
+    res.status(201).json({
+        success: true,
+        data: {
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                avatar: user.avatar,
+            },
+        },
+    });
+});
+// ─── Student Quick Access (Passwordless) ──────────────────────────────────────
+exports.studentQuickAccess = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { name, identifier } = req.body;
+    if (!identifier || typeof identifier !== 'string' || !identifier.trim()) {
+        throw (0, errorHandler_1.createError)('Enrollment number or mobile number is required', 400, 'IDENTIFIER_REQUIRED');
+    }
+    const cleanIdentifier = identifier.trim();
+    let digitsOnly = cleanIdentifier.replace(/\D/g, '');
+    // Normalize Indian mobile numbers with +91 or leading 0
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+        digitsOnly = digitsOnly.slice(2);
+    }
+    else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+        digitsOnly = digitsOnly.slice(1);
+    }
+    const digitCount = digitsOnly.length;
+    const isPhone = digitCount === 10;
+    const isEnrollment = digitCount === 13;
+    const normalizedPhone = isPhone ? digitsOnly : '';
+    // 1. Check if student profile or user already exists (returning student lookup)
+    let existingProfile = await StudentProfile_1.StudentProfile.findOne({
+        studentId: { $regex: new RegExp(`^${digitsOnly || cleanIdentifier}$`, 'i') },
+    });
+    let user = null;
+    if (existingProfile) {
+        user = await User_1.User.findById(existingProfile.userId);
+    }
+    if (!user) {
+        const orConditions = [];
+        if (isEnrollment || !isPhone) {
+            orConditions.push({ enrollmentNumber: { $regex: new RegExp(`^${digitsOnly || cleanIdentifier}$`, 'i') } });
+        }
+        if (normalizedPhone) {
+            orConditions.push({ phone: { $regex: normalizedPhone } });
+        }
+        if (orConditions.length > 0) {
+            user = await User_1.User.findOne({
+                role: 'STUDENT',
+                $or: orConditions,
+            });
+        }
+        if (user && !existingProfile) {
+            existingProfile = await StudentProfile_1.StudentProfile.findOne({ userId: user._id });
+        }
+    }
+    // Returning student found: log them in immediately without password
+    if (user) {
+        if (name && typeof name === 'string' && name.trim().length >= 2 && user.name !== name.trim()) {
+            user.name = name.trim();
+            await user.save();
+        }
+        const { accessToken, refreshToken } = generateTokens(user._id.toString(), user.role, user.email);
+        await User_1.User.findByIdAndUpdate(user._id, { refreshToken });
+        setTokenCookies(res, accessToken, refreshToken);
+        return res.json({
+            success: true,
+            data: {
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone || normalizedPhone || '',
+                    enrollmentNumber: user.enrollmentNumber || (isEnrollment ? digitsOnly : ''),
+                    role: user.role,
+                },
+                isReturning: true,
+            },
+        });
+    }
+    // First-time student signing up: validate count of digits
+    if (!isPhone && !isEnrollment) {
+        throw (0, errorHandler_1.createError)(`Invalid number length (${digitCount} digits). Enrollment number must be exactly 13 digits, or mobile number must be exactly 10 digits.`, 400, 'INVALID_IDENTIFIER_COUNT');
+    }
+    const studentName = (name && typeof name === 'string') ? name.trim() : '';
+    if (!studentName || studentName.length < 2) {
+        throw (0, errorHandler_1.createError)('Full name is required for first-time students', 400, 'NAME_REQUIRED');
+    }
+    const safeSlug = digitsOnly || cleanIdentifier.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || Date.now().toString();
+    const syntheticEmail = `student_${safeSlug}_${Math.floor(1000 + Math.random() * 9000)}@campusprint.internal`;
+    // Save according to digit count:
+    // 10 digits -> saved as mobile number (phone)
+    // 13 digits -> saved as enrollment number
+    const newUser = await User_1.User.create({
+        name: studentName,
+        email: syntheticEmail,
+        phone: isPhone ? `+91${digitsOnly}` : undefined,
+        enrollmentNumber: isEnrollment ? digitsOnly : undefined,
+        role: 'STUDENT',
+    });
+    await StudentProfile_1.StudentProfile.create({
+        userId: newUser._id,
+        studentId: isEnrollment ? digitsOnly : digitsOnly,
+    });
+    const { accessToken, refreshToken } = generateTokens(newUser._id.toString(), newUser.role, newUser.email);
+    await User_1.User.findByIdAndUpdate(newUser._id, { refreshToken });
+    setTokenCookies(res, accessToken, refreshToken);
+    return res.status(201).json({
+        success: true,
+        data: {
+            user: {
+                _id: newUser._id,
+                name: newUser.name,
+                email: newUser.email,
+                phone: newUser.phone || '',
+                enrollmentNumber: newUser.enrollmentNumber || '',
+                role: newUser.role,
+            },
+            isReturning: false,
+        },
+    });
+});
+const HARDCODED_ADMIN_EMAIL = 'admin@campusprint.com';
+const HARDCODED_ADMIN_PASSWORD = 'CampusPrint@Admin2026!';
+exports.login = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const emailInput = req.body.email || req.body.identifier;
+    const { password } = req.body;
+    if (!emailInput || typeof emailInput !== 'string') {
+        throw (0, errorHandler_1.createError)('Email is required', 400, 'EMAIL_REQUIRED');
+    }
+    const normalizedEmail = emailInput.trim().toLowerCase();
+    // ─── Hardcoded Developer Admin Authentication ───────────────────────────────
+    if (normalizedEmail === HARDCODED_ADMIN_EMAIL &&
+        password === HARDCODED_ADMIN_PASSWORD) {
+        let adminUser = await User_1.User.findOne({ email: HARDCODED_ADMIN_EMAIL });
+        if (!adminUser) {
+            const passwordHash = await bcryptjs_1.default.hash(HARDCODED_ADMIN_PASSWORD, 10);
+            adminUser = await User_1.User.create({
+                name: 'System Administrator',
+                email: HARDCODED_ADMIN_EMAIL,
+                passwordHash,
+                role: 'SUPER_ADMIN',
+                isActive: true,
+            });
+        }
+        else {
+            if (adminUser.role !== 'SUPER_ADMIN' && adminUser.role !== 'ADMIN') {
+                adminUser.role = 'SUPER_ADMIN';
+            }
+            adminUser.isActive = true;
+            await adminUser.save();
+        }
+        const { accessToken, refreshToken } = generateTokens(adminUser._id.toString(), adminUser.role, adminUser.email);
+        await User_1.User.findByIdAndUpdate(adminUser._id, { refreshToken });
+        setTokenCookies(res, accessToken, refreshToken);
+        return res.json({
+            success: true,
+            data: {
+                user: {
+                    _id: adminUser._id,
+                    name: adminUser.name,
+                    email: adminUser.email,
+                    phone: adminUser.phone,
+                    role: adminUser.role,
+                    avatar: adminUser.avatar,
+                    universityId: adminUser.universityId,
+                    campusId: adminUser.campusId,
+                },
+            },
+        });
+    }
+    const user = await User_1.User.findOne({ email: normalizedEmail });
+    if (!user || !user.isActive) {
+        throw (0, errorHandler_1.createError)('Invalid credentials', 401, 'INVALID_CREDENTIALS');
+    }
+    const isValid = await user.comparePassword(password);
+    if (!isValid) {
+        throw (0, errorHandler_1.createError)('Invalid credentials', 401, 'INVALID_CREDENTIALS');
+    }
+    const { accessToken, refreshToken } = generateTokens(user._id.toString(), user.role, user.email);
+    await User_1.User.findByIdAndUpdate(user._id, { refreshToken });
+    setTokenCookies(res, accessToken, refreshToken);
+    res.json({
+        success: true,
+        data: {
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                avatar: user.avatar,
+                universityId: user.universityId,
+                campusId: user.campusId,
+            },
+        },
+    });
+});
+exports.logout = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    if (req.user) {
+        await User_1.User.findByIdAndUpdate(req.user._id, { refreshToken: null });
+    }
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    res.json({ success: true, message: 'Logged out successfully' });
+});
+exports.getMe = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const user = await User_1.User.findById(req.user?._id).select('-passwordHash -refreshToken');
+    if (!user) {
+        throw (0, errorHandler_1.createError)('User not found', 404, 'USER_NOT_FOUND');
+    }
+    res.json({ success: true, data: { user } });
+});
+exports.refresh = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const token = req.cookies?.refreshToken;
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            message: 'No active session found',
+            code: 'NO_REFRESH_TOKEN',
+        });
+    }
+    const decoded = jsonwebtoken_1.default.verify(token, env_1.env.JWT_REFRESH_SECRET);
+    const user = await User_1.User.findById(decoded._id);
+    if (!user || user.refreshToken !== token || !user.isActive) {
+        throw (0, errorHandler_1.createError)('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
+    }
+    const { accessToken, refreshToken } = generateTokens(user._id.toString(), user.role, user.email);
+    await User_1.User.findByIdAndUpdate(user._id, { refreshToken });
+    setTokenCookies(res, accessToken, refreshToken);
+    res.json({ success: true, message: 'Tokens refreshed' });
+});
+//# sourceMappingURL=authController.js.map

@@ -1,0 +1,17 @@
+{
+  "name": "campusprint",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CampusPrint - Campus Online Printing Platform",
+  "scripts": {
+    "dev:client": "npm --prefix client run dev",
+    "dev:server": "npm --prefix server run dev",
+    "build:client": "npm --prefix client run build",
+    "build:server": "npm --prefix server run build",
+    "build": "npm run build:server && npm run build:client",
+    "seed": "npm --prefix server run seed"
+  },
+  "keywords": ["printing", "campus", "pwa", "react", "nodejs"],
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,24 @@
+import { Response } from 'express';
+export declare const getAdminDashboard: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getUniversities: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getUniversityById: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const createUniversity: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getCampuses: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const createCampus: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminVendors: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const updateVendorStatus: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const approveVendor: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const suspendVendor: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getUsers: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getStudentDetails: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const deactivateUser: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminOrders: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminOrderById: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminPayments: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getComplaints: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const updateComplaint: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminAnalytics: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAuditLogs: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getAdminSettings: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const updateAdminSettings: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+//# sourceMappingURL=adminController.d.ts.map
