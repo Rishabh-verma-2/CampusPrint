@@ -4,6 +4,7 @@ import { ShieldCheck, ArrowRight, ArrowLeft, Lock, Mail } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Spinner } from '../../components/ui';
 import { toast } from 'sonner';
+import { BrandLogo } from '../../components/common/BrandLogo';
 
 const AdminLoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -51,11 +52,8 @@ const AdminLoginPage: React.FC = () => {
       </div>
 
       <div className="w-full max-w-md text-center mx-auto">
-        <div className="inline-flex items-center gap-2.5 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-xs">
-            <ShieldCheck className="w-5 h-5 text-blue-400" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">CampusPrint</span>
+        <div className="inline-flex items-center mb-4">
+          <BrandLogo size="lg" />
         </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">

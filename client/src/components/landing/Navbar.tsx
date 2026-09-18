@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Printer, ArrowRight } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import { BrandLogo } from '../common/BrandLogo';
 
 export const Navbar: React.FC = () => {
   return (
@@ -8,11 +9,8 @@ export const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Brand */}
-          <Link to="/" className="flex items-center gap-2.5 text-slate-900 font-semibold text-lg tracking-tight hover:opacity-90 transition-opacity">
-            <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
-              <Printer className="w-5 h-5" />
-            </div>
-            <span>CampusPrint</span>
+          <Link to="/" className="hover:opacity-90 transition-opacity">
+            <BrandLogo size="md" />
           </Link>
 
           {/* Right Actions */}

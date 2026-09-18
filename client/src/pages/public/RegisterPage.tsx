@@ -4,6 +4,7 @@ import { Printer, ArrowRight, ArrowLeft, User as UserIcon, Hash } from 'lucide-r
 import { useAuth } from '../../context/AuthContext';
 import { Spinner } from '../../components/ui';
 import { toast } from 'sonner';
+import { BrandLogo } from '../../components/common/BrandLogo';
 
 const RegisterPage: React.FC = () => {
   const navigate = useNavigate();
@@ -58,11 +59,8 @@ const RegisterPage: React.FC = () => {
 
       <div className="w-full max-w-md text-center mx-auto">
         {/* Brand Mark */}
-        <Link to="/" className="inline-flex items-center gap-2.5 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-            <Printer className="w-5 h-5" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">CampusPrint</span>
+        <Link to="/" className="inline-flex items-center mb-4 hover:opacity-90 transition-opacity">
+          <BrandLogo size="lg" />
         </Link>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">

@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { BrandLogo } from '../components/common/BrandLogo';
 
 const navGroups = [
   {
@@ -73,15 +74,10 @@ const AdminLayout: React.FC = () => {
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900 selection:bg-blue-100 selection:text-blue-900 text-left">
       {/* ─── Mobile Header ─────────────────────────────────────────────────── */}
       <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-30 shadow-2xs">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
-            <Printer className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="font-bold text-sm text-slate-900">CampusPrint</div>
-            <div className="text-[10px] text-slate-500 font-medium">Parul University Admin</div>
-          </div>
-        </div>
+        <BrandLogo
+          size="sm"
+          subtitle={<span className="text-[10px] text-slate-500 font-medium">Parul University Admin</span>}
+        />
 
         <button
           type="button"
@@ -109,19 +105,10 @@ const AdminLayout: React.FC = () => {
       >
         {/* Logo & University Context */}
         <div className="p-4 border-b border-slate-100 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs flex-shrink-0">
-              <Printer className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-base tracking-tight text-slate-900 leading-none">
-                CampusPrint
-              </div>
-              <div className="text-xs text-blue-600 font-semibold mt-1 truncate">
-                Parul University
-              </div>
-            </div>
-          </div>
+          <BrandLogo
+            size="md"
+            subtitle={<span className="text-xs text-blue-600 font-semibold">Parul University</span>}
+          />
 
           <div className="mt-2.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-medium text-slate-600">
             <ShieldCheck size={12} className="text-blue-600" />

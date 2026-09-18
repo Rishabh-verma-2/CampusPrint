@@ -1,0 +1,1 @@
+import{a as e,i as t}from"./clock-BXZO0QzB.js";import{o as n}from"./index-CBhYtriE.js";e();var r=t(),i=()=>(0,r.jsx)(`div`,{className:`cp-page animate-fade-in`,children:(0,r.jsx)(n,{title:`Notifications`,subtitle:`Coming soon`})});export{i as default};

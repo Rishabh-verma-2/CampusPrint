@@ -22,6 +22,7 @@ import { useSocket } from '../context/SocketContext';
 import { vendorApi } from '../api/vendorApi';
 import NotificationBell from '../components/common/NotificationBell';
 import { toast } from 'sonner';
+import { BrandLogo } from '../components/common/BrandLogo';
 
 const navItems = [
   { to: '/vendor', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -134,19 +135,10 @@ const VendorLayout: React.FC = () => {
       >
         {/* Brand & Store Header */}
         <div className="p-4 border-b border-slate-100 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs flex-shrink-0">
-              <Printer className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="font-bold text-base tracking-tight text-slate-900 leading-none">
-                CampusPrint
-              </div>
-              <div className="text-xs text-blue-600 font-semibold mt-1 truncate">
-                {vendor?.shopName || 'Vendor Station'}
-              </div>
-            </div>
-          </div>
+          <BrandLogo
+            size="md"
+            subtitle={<span className="text-xs text-blue-600 font-semibold">{vendor?.shopName || 'Vendor Station'}</span>}
+          />
 
           <div className="mt-3 flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs">
             <div className="flex items-center gap-1.5">

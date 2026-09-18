@@ -3,6 +3,7 @@ import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom';
 import { Printer, Home, FileText, User as UserIcon, Plus, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import NotificationBell from '../components/common/NotificationBell';
+import { BrandLogo } from '../components/common/BrandLogo';
 
 const desktopNavItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
@@ -50,12 +51,9 @@ const StudentLayout: React.FC = () => {
           {/* Logo */}
           <Link
             to="/student"
-            className="flex items-center gap-2.5 text-slate-900 font-bold text-base tracking-tight hover:opacity-90 transition-opacity"
+            className="hover:opacity-90 transition-opacity"
           >
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs">
-              <Printer className="w-4 h-4" />
-            </div>
-            <span>CampusPrint</span>
+            <BrandLogo size="sm" />
           </Link>
 
           {/* Desktop Navigation Links */}

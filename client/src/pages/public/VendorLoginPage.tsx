@@ -4,6 +4,7 @@ import { Printer, ArrowRight, ArrowLeft, Store, Lock, Mail, Eye, EyeOff } from '
 import { useAuth } from '../../context/AuthContext';
 import { Spinner } from '../../components/ui';
 import { toast } from 'sonner';
+import { BrandLogo } from '../../components/common/BrandLogo';
 
 const VendorLoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -54,11 +55,8 @@ const VendorLoginPage: React.FC = () => {
       </div>
 
       <div className="w-full max-w-md text-center mx-auto">
-        <div className="inline-flex items-center gap-2.5 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
-            <Printer className="w-5 h-5" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">CampusPrint</span>
+        <div className="inline-flex items-center mb-4">
+          <BrandLogo size="lg" />
         </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center justify-center gap-2">
