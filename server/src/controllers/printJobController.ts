@@ -99,27 +99,19 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
     campusId: vendor.campusId,
     documentId: documents[0]._id,
     documentIds: documents.map((d) => d._id),
-    status: 'QUEUED',
+    status: 'PAYMENT_PENDING', // Job starts awaiting payment
     printConfig: configWithPages,
     priceSnapshot,
     pricing,
   });
 
-  // Emit real-time event to vendor and student
-  emitJobUpdate(vendor._id.toString(), req.user!._id, printJob);
-
-  // Send notification to vendor
+  // NOTE: We do NOT emit to vendor or notify vendor here.
+  // Vendor is only notified after payment is confirmed (handled in paymentController → transitionJobToPaid).
+  // We do emit to the student so their UI can update.
   try {
-    await NotificationService.create(
-      vendor.userId.toString(),
-      'JOB_QUEUED',
-      'New Print Job Received',
-      `New print job ${printJob.publicToken} from ${customerName} is waiting in your queue.`,
-      { jobId: printJob._id, token: printJob.publicToken }
-    );
-  } catch (err) {
-    // Ignore notification failure if vendor user not found
-  }
+    const io = (await import('../sockets/socketManager')).getIO();
+    io.to(`student:${req.user!._id}`).emit('printJob:created', { job: printJob });
+  } catch { /* Socket not initialized */ }
 
   res.status(201).json({
     success: true,
@@ -193,13 +185,39 @@ export const getPrintJob = asyncHandler(async (req: AuthRequest, res: Response) 
   // Get signed URL for vendor
   let documentUrl: string | undefined;
   if (role === 'VENDOR' || role === 'ADMIN' || role === 'SUPER_ADMIN') {
-    const doc = await DocumentModel.findById(job.documentId);
+    const docId = (job.documentId as any)?._id || job.documentId;
+    const doc = await DocumentModel.findById(docId);
     if (doc) {
       documentUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
     }
   }
 
   res.json({ success: true, data: { job, documentUrl } });
+});
+
+export const downloadPrintJobFile = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const job = await PrintJob.findById(req.params.id);
+  if (!job) throw createError('Print job not found', 404, 'JOB_NOT_FOUND');
+
+  const role = req.user!.role;
+  const userId = req.user!._id;
+
+  if (role === 'STUDENT' && job.studentId.toString() !== userId) {
+    throw createError('Access denied', 403, 'FORBIDDEN');
+  }
+  if (role === 'VENDOR') {
+    const vendor = await Vendor.findOne({ userId });
+    if (!vendor || job.vendorId.toString() !== vendor._id.toString()) {
+      throw createError('Access denied', 403, 'FORBIDDEN');
+    }
+  }
+
+  const docId = (job.documentId as any)?._id || job.documentId;
+  const doc = await DocumentModel.findById(docId);
+  if (!doc) throw createError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
+
+  const fileUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
+  res.redirect(fileUrl);
 });
 
 // ─── Vendor: Accept Job ───────────────────────────────────────────────────────
@@ -212,6 +230,11 @@ export const acceptPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
   if (!job) throw createError('Job not found', 404, 'JOB_NOT_FOUND');
   if (job.vendorId.toString() !== vendor._id.toString()) {
     throw createError('Access denied', 403, 'FORBIDDEN');
+  }
+
+  // PAYMENT GUARD: Vendor cannot accept unpaid jobs
+  if (job.status === 'PAYMENT_PENDING') {
+    throw createError('Cannot accept job: payment has not been completed', 400, 'PAYMENT_REQUIRED');
   }
 
   PrintJobStateMachine.assertTransition(job.status, 'ACCEPTED');
@@ -240,6 +263,11 @@ export const startPrinting = asyncHandler(async (req: AuthRequest, res: Response
   const job = await PrintJob.findById(req.params.id);
   if (!job) throw createError('Job not found', 404, 'JOB_NOT_FOUND');
   if (job.vendorId.toString() !== vendor._id.toString()) throw createError('Forbidden', 403, 'FORBIDDEN');
+
+  // PAYMENT GUARD: Cannot start printing without payment
+  if (job.status === 'PAYMENT_PENDING') {
+    throw createError('Cannot start printing: payment has not been completed', 400, 'PAYMENT_REQUIRED');
+  }
 
   PrintJobStateMachine.assertTransition(job.status, 'PRINTING');
   job.status = 'PRINTING';

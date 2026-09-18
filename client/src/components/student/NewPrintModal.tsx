@@ -40,6 +40,7 @@ interface InFlightUpload {
   id: string;
   name: string;
   progress: number;
+  statusText?: string;
 }
 
 const STEPS: { key: StepKey; label: string; number: number }[] = [
@@ -142,12 +143,26 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
 
     for (const file of validFiles) {
       const tempId = `temp-${Date.now()}-${Math.random()}`;
-      setInFlight((prev) => [...prev, { id: tempId, name: file.name, progress: 10 }]);
+      setInFlight((prev) => [
+        ...prev,
+        { id: tempId, name: file.name, progress: 15, statusText: 'Uploading document...' },
+      ]);
 
       try {
         const res = await documentApi.upload(file, (pct) => {
           setInFlight((prev) =>
-            prev.map((item) => (item.id === tempId ? { ...item, progress: Math.max(pct, 15) } : item))
+            prev.map((item) =>
+              item.id === tempId
+                ? {
+                    ...item,
+                    progress: pct >= 100 ? 95 : Math.max(pct, 15),
+                    statusText:
+                      pct >= 100
+                        ? 'Processing & saving to cloud...'
+                        : `Uploading ${pct}%...`,
+                  }
+                : item
+            )
           );
         });
 
@@ -411,15 +426,31 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
                   multiple
                   className="hidden"
                 />
-                <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
-                  <UploadCloud size={24} />
-                </div>
-                <div className="font-semibold text-slate-800 text-sm">
-                  Click to upload or drag & drop files
-                </div>
-                <div className="text-xs text-slate-400 mt-1">
-                  Supported format: PDF only • Up to 20MB
-                </div>
+                {inFlight.length > 0 ? (
+                  <div className="py-2">
+                    <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                      <Loader2 size={24} className="animate-spin text-blue-600" />
+                    </div>
+                    <div className="font-semibold text-blue-700 text-sm">
+                      Uploading {inFlight.length} document{inFlight.length > 1 ? 's' : ''}...
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      Processing pages & securing in cloud storage. Please wait...
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                      <UploadCloud size={24} />
+                    </div>
+                    <div className="font-semibold text-slate-800 text-sm">
+                      Click to upload or drag & drop files
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      Supported format: PDF only • Up to 20MB
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Uploaded Documents List */}
@@ -476,19 +507,29 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
                     {inFlight.map((item) => (
                       <div
                         key={item.id}
-                        className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1.5"
+                        className="p-3 rounded-lg border border-blue-200/80 bg-blue-50/40 space-y-2"
                       >
                         <div className="flex items-center justify-between text-xs">
-                          <span className="font-medium text-slate-700 truncate max-w-[200px]">
-                            {item.name}
-                          </span>
-                          <span className="text-slate-400 font-semibold">{item.progress}%</span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Loader2 size={14} className="animate-spin text-blue-600 flex-shrink-0" />
+                            <span className="font-medium text-slate-700 truncate max-w-[180px] sm:max-w-[240px]">
+                              {item.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="text-[11px] text-blue-700 font-medium">
+                              {item.statusText || (item.progress >= 95 ? 'Saving to cloud...' : 'Uploading...')}
+                            </span>
+                            <span className="text-blue-600 font-semibold">{item.progress}%</span>
+                          </div>
                         </div>
-                        <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                        <div className="w-full bg-blue-100 h-2 rounded-full overflow-hidden relative">
                           <div
-                            className="bg-blue-600 h-1.5 transition-all duration-200"
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300 relative overflow-hidden"
                             style={{ width: `${item.progress}%` }}
-                          />
+                          >
+                            <div className="absolute inset-0 bg-white/25 animate-pulse" />
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -988,10 +1029,19 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
                 type="button"
                 disabled={documents.length === 0 || inFlight.length > 0}
                 onClick={() => setCurrentStep('store')}
-                className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-xs"
+                className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center gap-1.5 shadow-xs"
               >
-                <span>Continue to Store</span>
-                <ArrowRight size={16} />
+                {inFlight.length > 0 ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Continue to Store</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
               </button>
             </>
           )}

@@ -32,7 +32,7 @@ export class StorageService {
     const hasCloudinary =
       env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET;
 
-    if (hasCloudinary && env.isProd()) {
+    if (hasCloudinary) {
       return this.uploadToCloudinary(localPath, originalName);
     }
 
@@ -87,7 +87,7 @@ export class StorageService {
       return `/uploads/${fileName}`;
     }
 
-    // Cloudinary signed URL (expires in 1 hour)
+    // Cloudinary signed URL
     const cloudinary = await import('cloudinary');
     cloudinary.v2.config({
       cloud_name: env.CLOUDINARY_CLOUD_NAME,
@@ -95,10 +95,11 @@ export class StorageService {
       api_secret: env.CLOUDINARY_API_SECRET,
     });
 
-    return cloudinary.v2.url(storageKey, {
-      sign_url: true,
-      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    // Cloudinary private download URL for raw assets bypasses ACL delivery restrictions
+    return cloudinary.v2.utils.private_download_url(storageKey, '', {
       resource_type: 'raw',
+      type: 'upload',
+      expires_at: Math.floor(Date.now() / 1000) + 7200,
     });
   }
 

@@ -22,6 +22,8 @@ export type PaymentStatus =
   | 'PENDING'
   | 'SUCCESS'
   | 'FAILED'
+  | 'USER_DROPPED'
+  | 'CANCELLED'
   | 'REFUNDED'
   | 'PARTIALLY_REFUNDED';
 

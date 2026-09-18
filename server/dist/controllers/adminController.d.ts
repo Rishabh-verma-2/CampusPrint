@@ -9,6 +9,7 @@ export declare const getAdminVendors: (req: import("express").Request, res: Resp
 export declare const updateVendorStatus: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const approveVendor: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const suspendVendor: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getVendorCredentials: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const createVendor: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const getUsers: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const getStudentDetails: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;

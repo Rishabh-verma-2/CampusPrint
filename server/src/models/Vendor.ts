@@ -18,6 +18,7 @@ export interface IVendor extends Document {
   qrCode?: string;
   rating: number;
   totalRatings: number;
+  portalPassword?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -57,6 +58,7 @@ const vendorSchema = new Schema<IVendor>(
     qrCode: { type: String },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     totalRatings: { type: Number, default: 0 },
+    portalPassword: { type: String },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

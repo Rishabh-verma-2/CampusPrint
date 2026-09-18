@@ -8,6 +8,7 @@ const router = (0, express_1.Router)();
 router.post('/', authenticate_1.authenticate, authenticate_1.requireStudent, printJobController_1.createPrintJob);
 router.get('/', authenticate_1.authenticate, printJobController_1.getMyPrintJobs);
 router.get('/:id', authenticate_1.authenticate, printJobController_1.getPrintJob);
+router.get('/:id/file', authenticate_1.authenticate, printJobController_1.downloadPrintJobFile);
 router.post('/:id/cancel', authenticate_1.authenticate, printJobController_1.cancelPrintJob);
 // Vendor
 router.post('/:id/accept', authenticate_1.authenticate, authenticate_1.requireVendor, printJobController_1.acceptPrintJob);

@@ -16,6 +16,12 @@ import {
   Plus,
   Mail,
   Sliders,
+  Copy,
+  Check,
+  EyeOff,
+  ExternalLink,
+  Lock,
+  Key,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi } from '../../api/adminApi';
@@ -34,6 +40,7 @@ const VendorsPage: React.FC = () => {
     ownerName: '',
     phone: '',
     email: '',
+    password: '',
     address: '',
     bwPerPage: 1.5,
     colorPerPage: 5.0,
@@ -41,6 +48,32 @@ const VendorsPage: React.FC = () => {
     openTime: '08:30',
     closeTime: '20:00',
   });
+
+  // Generated Vendor Credentials Modal
+  const [createdCredentials, setCreatedCredentials] = useState<{
+    shopName: string;
+    ownerName: string;
+    email: string;
+    phone: string;
+    password: string;
+    loginUrl: string;
+  } | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    toast.success(`Copied ${field} to clipboard`);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const copyAllCredentials = () => {
+    if (!createdCredentials) return;
+    const fullText = `=== CampusPrint Vendor Portal Credentials ===\nShop Name: ${createdCredentials.shopName}\nOwner: ${createdCredentials.ownerName}\nLogin Email: ${createdCredentials.email}\nPhone: ${createdCredentials.phone}\nPassword: ${createdCredentials.password}\nPortal URL: ${window.location.origin}${createdCredentials.loginUrl}\n=============================================`;
+    navigator.clipboard.writeText(fullText);
+    toast.success('All vendor login credentials copied to clipboard');
+  };
 
   const {
     data,
@@ -82,17 +115,32 @@ const VendorsPage: React.FC = () => {
 
   const createVendorMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => adminApi.createVendor(data),
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ['adminVendors'] });
       queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
       queryClient.invalidateQueries({ queryKey: ['activeVendors'] });
-      toast.success('Vendor store generated and activated! It is now live for students.');
+      
+      const creds = res.data?.data?.credentials;
+      const vendor = res.data?.data?.vendor;
+      if (creds) {
+        setCreatedCredentials({
+          shopName: vendor?.shopName || newVendorData.shopName,
+          ownerName: vendor?.ownerName || newVendorData.ownerName,
+          email: creds.email,
+          phone: creds.phone,
+          password: creds.password,
+          loginUrl: creds.loginUrl || '/vendor/login',
+        });
+      }
+
+      toast.success('Vendor store generated and activated! Credentials created.');
       setIsAddModalOpen(false);
       setNewVendorData({
         shopName: '',
         ownerName: '',
         phone: '',
         email: '',
+        password: '',
         address: '',
         bwPerPage: 1.5,
         colorPerPage: 5.0,
@@ -103,6 +151,26 @@ const VendorsPage: React.FC = () => {
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.message || 'Failed to generate vendor store');
+    },
+  });
+
+  const viewCredentialsMutation = useMutation({
+    mutationFn: (id: string) => adminApi.getVendorCredentials(id),
+    onSuccess: (res: any) => {
+      const creds = res.data?.data?.credentials;
+      if (creds) {
+        setCreatedCredentials({
+          shopName: creds.shopName || selectedVendor?.shopName || 'Print Shop',
+          ownerName: creds.ownerName || selectedVendor?.ownerName || 'Vendor Manager',
+          email: creds.email,
+          phone: creds.phone,
+          password: creds.password,
+          loginUrl: '/vendor/login',
+        });
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.message || 'Failed to fetch vendor credentials');
     },
   });
 
@@ -286,10 +354,21 @@ const VendorsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setSelectedVendor(vendor)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                             title="View Details"
                           >
                             <Eye size={15} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              viewCredentialsMutation.mutate(vendor._id);
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                            title="View Credentials & Password"
+                          >
+                            <Key size={15} />
                           </button>
 
                           <button
@@ -411,19 +490,49 @@ const VendorsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Email Address (Optional)
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="e.g. centralprint@parul.ac.in"
-                    value={newVendorData.email}
-                    onChange={(e) =>
-                      setNewVendorData({ ...newVendorData, email: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Email Address (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="Auto-generated if blank"
+                      value={newVendorData.email}
+                      onChange={(e) =>
+                        setNewVendorData({ ...newVendorData, email: e.target.value })
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Auto-generated if left blank
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Portal Password (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Auto-generated if blank"
+                      value={newVendorData.password}
+                      onChange={(e) =>
+                        setNewVendorData({ ...newVendorData, password: e.target.value })
+                      }
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Auto-generated if left blank
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl flex items-start gap-2.5">
+                  <Key size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-blue-900 leading-relaxed">
+                    <span className="font-semibold">Auto-Generated Credentials:</span> A login ID (email/phone) and password will be generated for the vendor to sign into the Vendor Portal (<code className="text-blue-800 bg-blue-100 px-1 py-0.5 rounded font-mono text-[10px]">/vendor/login</code>). You will be able to view and copy them immediately upon saving.
+                  </div>
                 </div>
 
                 <div>
@@ -634,6 +743,48 @@ const VendorsPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Vendor Portal Credentials Card */}
+                <div className="p-4 bg-blue-50/60 border border-blue-200/80 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold text-blue-900 text-xs">
+                      <Key size={14} className="text-blue-600" />
+                      <span>Vendor Portal Credentials</span>
+                    </div>
+                    <span className="text-[10px] bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full">
+                      Account Info
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500 flex-shrink-0">Login Email:</span>
+                      <span className="font-mono font-medium text-slate-900 select-all truncate text-right">
+                        {selectedVendor.userId?.email || `vendor.${selectedVendor.shopName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)}.${selectedVendor.phone.slice(-4)}@campusprint.in`}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500 flex-shrink-0">Login Phone:</span>
+                      <span className="font-mono font-medium text-slate-900 select-all">
+                        {selectedVendor.phone}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-blue-100 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        viewCredentialsMutation.mutate(selectedVendor._id);
+                      }}
+                      disabled={viewCredentialsMutation.isPending}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      <Eye size={13} />
+                      <span>{viewCredentialsMutation.isPending ? 'Loading...' : 'View Credentials & Password'}</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Operating Hours */}
                 <div className="space-y-2">
                   <span className="font-bold uppercase tracking-wider text-slate-400 text-[10px]">
@@ -705,6 +856,129 @@ const VendorsPage: React.FC = () => {
                   type="button"
                   onClick={() => setSelectedVendor(null)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs rounded-xl transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Vendor Credentials Modal */}
+      {createdCredentials && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden animate-scale-in">
+            <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <Key size={18} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Vendor Portal Login Credentials
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Use these credentials to sign into the Vendor Portal
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreatedCredentials(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                <div className="text-xs font-bold text-slate-800">{createdCredentials.shopName}</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Manager: {createdCredentials.ownerName}</div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                      Login Email
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(createdCredentials.email, 'email')}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedField === 'email' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                      <span>{copiedField === 'email' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 break-all select-all">
+                    {createdCredentials.email}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                      Login Phone Number
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(createdCredentials.phone, 'phone')}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedField === 'phone' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                      <span>{copiedField === 'phone' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900 select-all">
+                    {createdCredentials.phone}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                      Password
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                        <span>{showPassword ? 'Hide' : 'Show'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(createdCredentials.password, 'password')}
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedField === 'password' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                        <span>{copiedField === 'password' ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-blue-700 select-all">
+                    {showPassword ? createdCredentials.password : '••••••••••••'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={copyAllCredentials}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Copy size={14} />
+                  <span>Copy Complete Login Details</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreatedCredentials(null)}
+                  className="w-full py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   Close
                 </button>

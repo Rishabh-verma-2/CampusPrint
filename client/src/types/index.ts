@@ -16,7 +16,7 @@ export type PrintJobStatus =
   | 'FAILED'
   | 'REFUNDED';
 
-export type PaymentStatus = 'CREATED' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
+export type PaymentStatus = 'CREATED' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'USER_DROPPED' | 'CANCELLED' | 'REFUNDED' | 'PARTIALLY_REFUNDED';
 export type VendorStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'ACTIVE';
 export type VendorAvailability = 'OPEN' | 'CLOSED' | 'UNAVAILABLE';
 

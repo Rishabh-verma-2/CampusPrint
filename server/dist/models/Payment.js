@@ -38,20 +38,36 @@ const mongoose_1 = __importStar(require("mongoose"));
 const paymentSchema = new mongoose_1.Schema({
     printJobId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'PrintJob', required: true },
     studentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
-    gateway: { type: String, required: true, default: 'MOCK' },
+    vendorId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Vendor' },
+    gateway: { type: String, required: true, default: 'CASHFREE' },
     gatewayOrderId: { type: String, required: true, unique: true },
     gatewayPaymentId: { type: String, unique: true, sparse: true },
     amount: { type: Number, required: true },
     currency: { type: String, default: 'INR' },
+    paymentMethod: { type: String },
     status: {
         type: String,
-        enum: ['CREATED', 'PENDING', 'SUCCESS', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'],
+        enum: [
+            'CREATED',
+            'PENDING',
+            'SUCCESS',
+            'FAILED',
+            'USER_DROPPED',
+            'CANCELLED',
+            'REFUNDED',
+            'PARTIALLY_REFUNDED',
+        ],
         default: 'CREATED',
     },
-    signature: { type: String },
+    cashfreeStatus: { type: String }, // Raw Cashfree status string
+    paidAt: { type: Date },
+    failedAt: { type: Date },
+    webhookReceivedAt: { type: Date },
+    userDroppedAt: { type: Date },
     metadata: { type: mongoose_1.Schema.Types.Mixed },
 }, { timestamps: true });
 paymentSchema.index({ printJobId: 1 });
 paymentSchema.index({ studentId: 1 });
+paymentSchema.index({ gatewayOrderId: 1 });
 exports.Payment = mongoose_1.default.model('Payment', paymentSchema);
 //# sourceMappingURL=Payment.js.map

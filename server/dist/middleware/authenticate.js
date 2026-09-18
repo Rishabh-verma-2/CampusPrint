@@ -9,7 +9,9 @@ const env_1 = require("../config/env");
 const User_1 = require("../models/User");
 const authenticate = async (req, res, next) => {
     try {
-        const token = req.cookies?.accessToken || req.headers.authorization?.replace('Bearer ', '');
+        const token = req.cookies?.accessToken ||
+            req.headers.authorization?.replace('Bearer ', '') ||
+            req.query?.token;
         if (!token) {
             res.status(401).json({ success: false, message: 'Authentication required', code: 'NO_TOKEN' });
             return;

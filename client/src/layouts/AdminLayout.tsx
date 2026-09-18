@@ -103,12 +103,12 @@ const AdminLayout: React.FC = () => {
 
       {/* ─── Sidebar ───────────────────────────────────────────────────────── */}
       <aside
-        className={`fixed md:sticky top-0 bottom-0 left-0 z-50 md:z-20 w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out md:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 md:z-20 w-64 h-screen bg-white border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >
         {/* Logo & University Context */}
-        <div className="p-4 border-b border-slate-100">
+        <div className="p-4 border-b border-slate-100 flex-shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-xs flex-shrink-0">
               <Printer className="w-5 h-5" />
@@ -161,7 +161,7 @@ const AdminLayout: React.FC = () => {
         </nav>
 
         {/* Admin Profile & Logout */}
-        <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+        <div className="p-3 border-t border-slate-100 bg-slate-50/50 flex-shrink-0">
           <div className="flex items-center gap-2.5 p-2 rounded-lg">
             <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold shadow-xs flex-shrink-0">
               {initial}
@@ -187,9 +187,11 @@ const AdminLayout: React.FC = () => {
       </aside>
 
       {/* ─── Main Content Canvas ───────────────────────────────────────────── */}
-      <main className="flex-1 overflow-x-hidden p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full">
-        <Outlet />
-      </main>
+      <div className="flex-1 md:pl-64 flex flex-col min-w-0">
+        <main className="flex-1 overflow-x-hidden p-4 sm:p-6 md:p-8 max-w-7xl mx-auto w-full">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 };

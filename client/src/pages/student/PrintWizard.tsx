@@ -22,17 +22,21 @@ import { toast } from 'sonner';
 import { documentApi } from '../../api/documentApi';
 import { vendorApi } from '../../api/vendorApi';
 import { printJobApi } from '../../api/printJobApi';
+import { paymentApi } from '../../api/paymentApi';
 import apiClient from '../../api/apiClient';
 import { useAuth } from '../../context/AuthContext';
 import { AvailabilityBadge, Spinner } from '../../components/ui';
 import type { DocumentFile, Vendor, PrintJob, ColorMode, SidesMode } from '../../types';
 
-type StepKey = 'upload' | 'store' | 'settings' | 'review' | 'queue';
+type StepKey = 'upload' | 'store' | 'settings' | 'review' | 'payment';
+
+type PaymentState = 'idle' | 'creating_job' | 'creating_order' | 'checkout' | 'verifying' | 'success' | 'failed' | 'dropped';
 
 interface InFlightUpload {
   id: string;
   name: string;
   progress: number;
+  statusText?: string;
 }
 
 const STEPS: { key: StepKey; label: string; number: number }[] = [
@@ -40,7 +44,7 @@ const STEPS: { key: StepKey; label: string; number: number }[] = [
   { key: 'store', label: 'Store', number: 2 },
   { key: 'settings', label: 'Settings', number: 3 },
   { key: 'review', label: 'Review', number: 4 },
-  { key: 'queue', label: 'Queue', number: 5 },
+  { key: 'payment', label: 'Pay', number: 5 },
 ];
 
 const PrintWizardPage: React.FC = () => {
@@ -68,10 +72,14 @@ const PrintWizardPage: React.FC = () => {
   const [customPages, setCustomPages] = useState<string>('');
   const [orientation, setOrientation] = useState<'AUTO' | 'PORTRAIT' | 'LANDSCAPE'>('AUTO');
 
-  // Step 4 & 5: Submission & Success
+  // Step 4 & 5: Submission & Payment
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdJob, setCreatedJob] = useState<PrintJob | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
+  const [paymentState, setPaymentState] = useState<PaymentState>('idle');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paidJobToken, setPaidJobToken] = useState<string | null>(null);
+  const [paidJobId, setPaidJobId] = useState<string | null>(null);
 
   // ─── Real Backend Vendors Query ─────────────────────────────────────────────
   const {
@@ -118,12 +126,26 @@ const PrintWizardPage: React.FC = () => {
 
     for (const file of validFiles) {
       const tempId = `temp-${Date.now()}-${Math.random()}`;
-      setInFlight((prev) => [...prev, { id: tempId, name: file.name, progress: 10 }]);
+      setInFlight((prev) => [
+        ...prev,
+        { id: tempId, name: file.name, progress: 15, statusText: 'Uploading document...' },
+      ]);
 
       try {
         const res = await documentApi.upload(file, (pct) => {
           setInFlight((prev) =>
-            prev.map((item) => (item.id === tempId ? { ...item, progress: Math.max(pct, 15) } : item))
+            prev.map((item) =>
+              item.id === tempId
+                ? {
+                    ...item,
+                    progress: pct >= 100 ? 95 : Math.max(pct, 15),
+                    statusText:
+                      pct >= 100
+                        ? 'Processing & saving to cloud...'
+                        : `Uploading ${pct}%...`,
+                  }
+                : item
+            )
           );
         });
 
@@ -210,7 +232,7 @@ const PrintWizardPage: React.FC = () => {
   const platformFee = dynamicPlatformFee;
   const estimatedTotal = subtotal + platformFee;
 
-  // ─── Submission Handler ─────────────────────────────────────────────────────
+  // ─── Submit: Create Job + Initiate Payment ──────────────────────────────────
   const handleSubmitJob = async () => {
     if (!selectedVendor) {
       toast.error('Please select a printing store first');
@@ -221,8 +243,12 @@ const PrintWizardPage: React.FC = () => {
       return;
     }
 
+    setPaymentState('creating_job');
     setIsSubmitting(true);
+    setPaymentError(null);
+
     try {
+      // STEP A: Create the PrintJob (status = PAYMENT_PENDING)
       const pageRanges =
         documents.length === 1 && pageMode === 'custom' && customPages.trim()
           ? customPages.trim()
@@ -243,17 +269,61 @@ const PrintWizardPage: React.FC = () => {
 
       const res = await printJobApi.create(payload);
       const job = res.data.data.printJob;
-
       setCreatedJob(job);
       queryClient.invalidateQueries({ queryKey: ['myJobs'] });
 
-      toast.success('Print job submitted successfully!');
-      setCurrentStep('queue');
+      // STEP B: Create Cashfree payment order (amount from server — not trusted from frontend)
+      setPaymentState('creating_order');
+      const orderRes = await paymentApi.createOrder(job._id);
+      const { paymentSessionId, payment } = orderRes.data.data;
+
+      if (!paymentSessionId) {
+        throw new Error('No payment session received from server');
+      }
+
+      // STEP C: Navigate to payment step then open Cashfree Checkout
+      setCurrentStep('payment');
+      setPaymentState('checkout');
+
+      // Load Cashfree JS SDK dynamically (sandbox or production)
+      const cashfreeMode = 'sandbox'; // Always sandbox for now — change when going live
+      await loadCashfreeSDK();
+
+      const cashfree = (window as any).Cashfree({ mode: cashfreeMode });
+
+      // Launch Cashfree Hosted Checkout (UPI only — enforced on backend via order_meta)
+      cashfree.checkout({
+        paymentSessionId,
+        redirectTarget: '_self', // Redirect in same tab to /payment/return
+      });
+
+      // After checkout(), the page will redirect to return_url set in the backend.
+      // We don't need to handle the result here — PaymentReturnPage does that.
+
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to create print job. Please try again.');
-    } finally {
+      console.error('[Payment] Error:', err);
+      const errMsg = err.response?.data?.message || err.message || 'Payment setup failed. Please try again.';
+      setPaymentError(errMsg);
+      setPaymentState('failed');
+      toast.error(errMsg);
       setIsSubmitting(false);
     }
+  };
+
+  // ─── Load Cashfree JS SDK (CDN) ─────────────────────────────────────────────
+  const loadCashfreeSDK = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if ((window as any).Cashfree) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load Cashfree SDK'));
+      document.head.appendChild(script);
+    });
   };
 
   const copyTokenToClipboard = () => {
@@ -293,7 +363,7 @@ const PrintWizardPage: React.FC = () => {
           </p>
         </div>
 
-        {currentStep !== 'queue' && (
+        {currentStep !== 'payment' && (
           <button
             type="button"
             onClick={() => navigate('/student')}
@@ -383,15 +453,31 @@ const PrintWizardPage: React.FC = () => {
                 multiple
                 className="hidden"
               />
-              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
-                <UploadCloud size={28} />
-              </div>
-              <div className="font-semibold text-slate-800 text-sm sm:text-base">
-                Click to upload or drag & drop files
-              </div>
-              <div className="text-xs text-slate-400 mt-1.5">
-                Supported format: PDF only • Max 20MB per document
-              </div>
+              {inFlight.length > 0 ? (
+                <div className="py-2">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                    <Loader2 size={28} className="animate-spin text-blue-600" />
+                  </div>
+                  <div className="font-semibold text-blue-700 text-sm sm:text-base">
+                    Uploading {inFlight.length} document{inFlight.length > 1 ? 's' : ''}...
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1.5">
+                    Processing pages & securing in cloud storage. Please wait...
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                    <UploadCloud size={28} />
+                  </div>
+                  <div className="font-semibold text-slate-800 text-sm sm:text-base">
+                    Click to upload or drag & drop files
+                  </div>
+                  <div className="text-xs text-slate-400 mt-1.5">
+                    Supported format: PDF only • Max 20MB per document
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Uploaded Documents List */}
@@ -448,19 +534,29 @@ const PrintWizardPage: React.FC = () => {
                   {inFlight.map((item) => (
                     <div
                       key={item.id}
-                      className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2"
+                      className="p-3.5 rounded-xl border border-blue-200/80 bg-blue-50/40 space-y-2 shadow-xs"
                     >
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-slate-700 truncate max-w-[240px]">
-                          {item.name}
-                        </span>
-                        <span className="text-slate-400 font-semibold">{item.progress}%</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Loader2 size={14} className="animate-spin text-blue-600 flex-shrink-0" />
+                          <span className="font-medium text-slate-700 truncate max-w-[200px] sm:max-w-[280px]">
+                            {item.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-[11px] text-blue-700 font-medium">
+                            {item.statusText || (item.progress >= 95 ? 'Saving to cloud...' : 'Uploading...')}
+                          </span>
+                          <span className="text-blue-600 font-semibold">{item.progress}%</span>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                      <div className="w-full bg-blue-100 h-2 rounded-full overflow-hidden relative">
                         <div
-                          className="bg-blue-600 h-1.5 transition-all duration-200"
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300 relative overflow-hidden"
                           style={{ width: `${item.progress}%` }}
-                        />
+                        >
+                          <div className="absolute inset-0 bg-white/25 animate-pulse" />
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -481,10 +577,19 @@ const PrintWizardPage: React.FC = () => {
                 type="button"
                 disabled={documents.length === 0 || inFlight.length > 0}
                 onClick={() => setCurrentStep('store')}
-                className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
+                className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
               >
-                <span>Continue to Store</span>
-                <ArrowRight size={16} />
+                {inFlight.length > 0 ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Continue to Store</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -872,7 +977,7 @@ const PrintWizardPage: React.FC = () => {
                 Review Your Print Job
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Confirm your order details before sending it to the vendor's print queue.
+                Confirm your order details before payment.
               </p>
             </div>
 
@@ -934,11 +1039,11 @@ const PrintWizardPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Estimated Cost */}
+              {/* Total */}
               <div className="flex items-center justify-between pt-1">
                 <div>
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Estimated Cost
+                    Total Amount
                   </span>
                   <span className="text-xs text-slate-400 block">
                     Includes ₹{platformFee} platform fee
@@ -950,11 +1055,11 @@ const PrintWizardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Clear notice */}
-            <div className="p-3.5 rounded-xl border border-blue-100 bg-blue-50/60 flex items-start gap-3">
-              <AlertCircle size={18} className="text-blue-600 flex-shrink-0 mt-0.5" />
-              <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
-                No online payment required right now. Your order will go directly to the vendor's print queue. You can collect it from the store when ready.
+            {/* UPI payment notice */}
+            <div className="p-3.5 rounded-xl border border-indigo-100 bg-indigo-50/60 flex items-start gap-3">
+              <AlertCircle size={18} className="text-indigo-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs sm:text-sm text-indigo-800 leading-relaxed">
+                You will be taken to a secure UPI payment screen. Your print job will be sent to the vendor only after payment is confirmed.
               </p>
             </div>
 
@@ -970,19 +1075,25 @@ const PrintWizardPage: React.FC = () => {
                 <span>Back</span>
               </button>
               <button
+                id="pay-with-upi-btn"
                 type="button"
-                disabled={isSubmitting}
+                disabled={isSubmitting || paymentState === 'creating_job' || paymentState === 'creating_order' || paymentState === 'checkout'}
                 onClick={handleSubmitJob}
-                className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center gap-2 shadow-xs cursor-pointer"
+                className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm sm:text-base font-bold transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
               >
-                {isSubmitting ? (
+                {(paymentState === 'creating_job' || paymentState === 'creating_order') ? (
                   <>
-                    <Loader2 size={16} className="animate-spin" />
-                    <span>Submitting...</span>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>{paymentState === 'creating_job' ? 'Creating order...' : 'Preparing payment...'}</span>
+                  </>
+                ) : paymentState === 'checkout' ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Opening checkout...</span>
                   </>
                 ) : (
                   <>
-                    <span>Submit Print Job</span>
+                    <span>Pay ₹{estimatedTotal} with UPI</span>
                     <ArrowRight size={16} />
                   </>
                 )}
@@ -992,86 +1103,55 @@ const PrintWizardPage: React.FC = () => {
         )}
 
         {/* ================================================================ */}
-        {/* STEP 5: QUEUED / SUCCESS                                         */}
+        {/* STEP 5: PAYMENT / PROCESSING                                      */}
         {/* ================================================================ */}
-        {currentStep === 'queue' && createdJob && (
+        {currentStep === 'payment' && (
           <div className="py-6 text-center space-y-6 animate-fade-in">
-            {/* Checkmark */}
-            <div className="w-16 h-16 rounded-full bg-green-50 text-green-600 flex items-center justify-center mx-auto border border-green-100 shadow-xs">
-              <CheckCircle2 size={36} />
-            </div>
-
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900 tracking-tight">
-                Print Job Placed Successfully!
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                Your print job has been placed in {selectedVendor?.shopName || 'the store'}'s queue.
-              </p>
-            </div>
-
-            {/* Prominent Token Display */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 max-w-sm mx-auto space-y-2.5">
-              <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
-                Pickup Token
-              </span>
-              <div className="flex items-center justify-center gap-2">
-                <span className="font-mono text-3xl font-extrabold text-blue-600 tracking-wider">
-                  {createdJob.publicToken}
-                </span>
-                <button
-                  type="button"
-                  onClick={copyTokenToClipboard}
-                  className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                  title="Copy Token"
-                >
-                  {copiedToken ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
-                </button>
-              </div>
-              <div className="pt-1">
-                <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  Waiting in Queue
-                </span>
-              </div>
-            </div>
-
-            {/* Details Summary */}
-            <div className="max-w-sm mx-auto text-xs text-slate-500 space-y-1.5 text-left bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <div className="flex justify-between">
-                <span>Store:</span>
-                <span className="font-semibold text-slate-700">{selectedVendor?.shopName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Documents:</span>
-                <span className="font-semibold text-slate-700">
-                  {documents.length} {documents.length === 1 ? 'file' : 'files'}, {totalPagesToPrint} pages
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Estimated Time:</span>
-                <span className="font-semibold text-slate-700">Usually ready in 5-10 mins</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => navigate('/student')}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
-              >
-                Back to Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/student/orders/${createdJob._id}`)}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span>Track Print Job</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
+            {paymentState === 'checkout' || paymentState === 'creating_order' || paymentState === 'creating_job' ? (
+              <>
+                <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto border border-indigo-100 shadow-xs">
+                  <Loader2 size={32} className="animate-spin" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {paymentState === 'creating_job' ? 'Creating your order...' :
+                     paymentState === 'creating_order' ? 'Preparing payment...' :
+                     'Opening secure payment...'}
+                  </h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    {paymentState === 'checkout'
+                      ? 'Redirecting to UPI payment. Please do not close this page.'
+                      : 'Almost there — setting up your secure payment.'}
+                  </p>
+                </div>
+              </>
+            ) : paymentState === 'failed' ? (
+              <>
+                <div className="w-16 h-16 rounded-full bg-red-50 text-red-600 flex items-center justify-center mx-auto border border-red-100">
+                  <AlertCircle size={32} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Payment Setup Failed</h2>
+                  <p className="text-sm text-slate-500 mt-1">{paymentError || 'Something went wrong. Please try again.'}</p>
+                </div>
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setCurrentStep('review'); setPaymentState('idle'); setPaymentError(null); }}
+                    className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 text-sm font-semibold transition-colors cursor-pointer"
+                  >
+                    Back to Review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitJob}
+                    className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold transition-colors cursor-pointer"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
         )}
 

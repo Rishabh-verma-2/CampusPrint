@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getVendorAnalytics = exports.updateVendorProfile = exports.updateVendorAvailability = exports.updateVendorPricing = exports.getVendorQueue = exports.getVendorDashboard = exports.getVendorPricing = exports.getVendorById = exports.getVendors = void 0;
+exports.getVendorAnalytics = exports.updateVendorProfile = exports.updateVendorAvailability = exports.updateVendorPricing = exports.getVendorQueue = exports.getVendorProfile = exports.getVendorDashboard = exports.getVendorPricing = exports.getVendorById = exports.getVendors = void 0;
 const errorHandler_1 = require("../middleware/errorHandler");
 const Vendor_1 = require("../models/Vendor");
 const PrintJob_1 = require("../models/PrintJob");
@@ -42,7 +42,9 @@ exports.getVendorPricing = (0, errorHandler_1.asyncHandler)(async (req, res) => 
 });
 // ─── Vendor: Dashboard Stats ──────────────────────────────────────────────────
 exports.getVendorDashboard = (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const vendor = await Vendor_1.Vendor.findOne({ userId: req.user._id });
+    const vendor = await Vendor_1.Vendor.findOne({ userId: req.user._id })
+        .populate('campusId', 'name')
+        .populate('universityId', 'name');
     if (!vendor)
         throw (0, errorHandler_1.createError)('Vendor not found', 404, 'VENDOR_NOT_FOUND');
     const today = new Date();
@@ -66,18 +68,44 @@ exports.getVendorDashboard = (0, errorHandler_1.asyncHandler)(async (req, res) =
         { $group: { _id: null, total: { $sum: '$pricing.vendorAmount' } } },
     ]);
     const todayRevenue = revenueAgg[0]?.total || 0;
+    // Recent jobs for quick dashboard feed
+    const recentJobs = await PrintJob_1.PrintJob.find({ vendorId: vendor._id })
+        .populate('studentId', 'name phone enrollmentNumber')
+        .populate('documentId', 'originalName pageCount fileSize')
+        .sort({ createdAt: -1 })
+        .limit(6)
+        .lean();
     res.json({
         success: true,
         data: {
             vendor: {
                 _id: vendor._id,
                 shopName: vendor.shopName,
+                ownerName: vendor.ownerName,
+                phone: vendor.phone,
+                address: vendor.address,
                 availability: vendor.availability,
                 status: vendor.status,
+                pricing: vendor.pricing,
+                operatingHours: vendor.operatingHours,
+                campus: vendor.campusId,
+                university: vendor.universityId,
             },
             stats: { totalToday, pending, printing, ready, completed, todayRevenue },
+            recentJobs,
         },
     });
+});
+// ─── Vendor: Get Profile ──────────────────────────────────────────────────────
+exports.getVendorProfile = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const vendor = await Vendor_1.Vendor.findOne({ userId: req.user._id })
+        .populate('userId', 'email phone name')
+        .populate('campusId', 'name')
+        .populate('universityId', 'name')
+        .lean();
+    if (!vendor)
+        throw (0, errorHandler_1.createError)('Vendor not found', 404, 'VENDOR_NOT_FOUND');
+    res.json({ success: true, data: { vendor } });
 });
 // ─── Vendor: Get Queue ────────────────────────────────────────────────────────
 exports.getVendorQueue = (0, errorHandler_1.asyncHandler)(async (req, res) => {

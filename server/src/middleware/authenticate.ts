@@ -18,7 +18,10 @@ export const authenticate = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const token = req.cookies?.accessToken || req.headers.authorization?.replace('Bearer ', '');
+    const token =
+      req.cookies?.accessToken ||
+      req.headers.authorization?.replace('Bearer ', '') ||
+      (req.query?.token as string | undefined);
 
     if (!token) {
       res.status(401).json({ success: false, message: 'Authentication required', code: 'NO_TOKEN' });

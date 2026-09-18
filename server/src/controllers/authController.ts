@@ -275,7 +275,10 @@ export const login = asyncHandler(async (req: AuthRequest, res: Response) => {
     });
   }
 
-  const user = await User.findOne({ email: normalizedEmail });
+  const trimmedInput = emailInput.trim();
+  const user = await User.findOne({
+    $or: [{ email: normalizedEmail }, { phone: trimmedInput }],
+  });
   if (!user || !user.isActive) {
     throw createError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
   }

@@ -1,6 +1,39 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.reportProblem = exports.verifyPickupToken = exports.collectPrintJob = exports.cancelPrintJob = exports.markReady = exports.startPrinting = exports.acceptPrintJob = exports.getPrintJob = exports.getMyPrintJobs = exports.createPrintJob = void 0;
+exports.reportProblem = exports.verifyPickupToken = exports.collectPrintJob = exports.cancelPrintJob = exports.markReady = exports.startPrinting = exports.acceptPrintJob = exports.downloadPrintJobFile = exports.getPrintJob = exports.getMyPrintJobs = exports.createPrintJob = void 0;
 const errorHandler_1 = require("../middleware/errorHandler");
 const Vendor_1 = require("../models/Vendor");
 const Document_1 = require("../models/Document");
@@ -85,20 +118,19 @@ exports.createPrintJob = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         campusId: vendor.campusId,
         documentId: documents[0]._id,
         documentIds: documents.map((d) => d._id),
-        status: 'QUEUED',
+        status: 'PAYMENT_PENDING', // Job starts awaiting payment
         printConfig: configWithPages,
         priceSnapshot,
         pricing,
     });
-    // Emit real-time event to vendor and student
-    emitJobUpdate(vendor._id.toString(), req.user._id, printJob);
-    // Send notification to vendor
+    // NOTE: We do NOT emit to vendor or notify vendor here.
+    // Vendor is only notified after payment is confirmed (handled in paymentController → transitionJobToPaid).
+    // We do emit to the student so their UI can update.
     try {
-        await NotificationService_1.NotificationService.create(vendor.userId.toString(), 'JOB_QUEUED', 'New Print Job Received', `New print job ${printJob.publicToken} from ${customerName} is waiting in your queue.`, { jobId: printJob._id, token: printJob.publicToken });
+        const io = (await Promise.resolve().then(() => __importStar(require('../sockets/socketManager')))).getIO();
+        io.to(`student:${req.user._id}`).emit('printJob:created', { job: printJob });
     }
-    catch (err) {
-        // Ignore notification failure if vendor user not found
-    }
+    catch { /* Socket not initialized */ }
     res.status(201).json({
         success: true,
         data: {
@@ -162,12 +194,35 @@ exports.getPrintJob = (0, errorHandler_1.asyncHandler)(async (req, res) => {
     // Get signed URL for vendor
     let documentUrl;
     if (role === 'VENDOR' || role === 'ADMIN' || role === 'SUPER_ADMIN') {
-        const doc = await Document_1.DocumentModel.findById(job.documentId);
+        const docId = job.documentId?._id || job.documentId;
+        const doc = await Document_1.DocumentModel.findById(docId);
         if (doc) {
             documentUrl = await StorageService_1.StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
         }
     }
     res.json({ success: true, data: { job, documentUrl } });
+});
+exports.downloadPrintJobFile = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const job = await PrintJob_1.PrintJob.findById(req.params.id);
+    if (!job)
+        throw (0, errorHandler_1.createError)('Print job not found', 404, 'JOB_NOT_FOUND');
+    const role = req.user.role;
+    const userId = req.user._id;
+    if (role === 'STUDENT' && job.studentId.toString() !== userId) {
+        throw (0, errorHandler_1.createError)('Access denied', 403, 'FORBIDDEN');
+    }
+    if (role === 'VENDOR') {
+        const vendor = await Vendor_1.Vendor.findOne({ userId });
+        if (!vendor || job.vendorId.toString() !== vendor._id.toString()) {
+            throw (0, errorHandler_1.createError)('Access denied', 403, 'FORBIDDEN');
+        }
+    }
+    const docId = job.documentId?._id || job.documentId;
+    const doc = await Document_1.DocumentModel.findById(docId);
+    if (!doc)
+        throw (0, errorHandler_1.createError)('Document not found', 404, 'DOCUMENT_NOT_FOUND');
+    const fileUrl = await StorageService_1.StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
+    res.redirect(fileUrl);
 });
 // ─── Vendor: Accept Job ───────────────────────────────────────────────────────
 exports.acceptPrintJob = (0, errorHandler_1.asyncHandler)(async (req, res) => {
@@ -179,6 +234,10 @@ exports.acceptPrintJob = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         throw (0, errorHandler_1.createError)('Job not found', 404, 'JOB_NOT_FOUND');
     if (job.vendorId.toString() !== vendor._id.toString()) {
         throw (0, errorHandler_1.createError)('Access denied', 403, 'FORBIDDEN');
+    }
+    // PAYMENT GUARD: Vendor cannot accept unpaid jobs
+    if (job.status === 'PAYMENT_PENDING') {
+        throw (0, errorHandler_1.createError)('Cannot accept job: payment has not been completed', 400, 'PAYMENT_REQUIRED');
     }
     PrintJobStateMachine_1.PrintJobStateMachine.assertTransition(job.status, 'ACCEPTED');
     job.status = 'ACCEPTED';
@@ -198,6 +257,10 @@ exports.startPrinting = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         throw (0, errorHandler_1.createError)('Job not found', 404, 'JOB_NOT_FOUND');
     if (job.vendorId.toString() !== vendor._id.toString())
         throw (0, errorHandler_1.createError)('Forbidden', 403, 'FORBIDDEN');
+    // PAYMENT GUARD: Cannot start printing without payment
+    if (job.status === 'PAYMENT_PENDING') {
+        throw (0, errorHandler_1.createError)('Cannot start printing: payment has not been completed', 400, 'PAYMENT_REQUIRED');
+    }
     PrintJobStateMachine_1.PrintJobStateMachine.assertTransition(job.status, 'PRINTING');
     job.status = 'PRINTING';
     job.printingStartedAt = new Date();

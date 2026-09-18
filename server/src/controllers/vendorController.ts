@@ -49,7 +49,9 @@ export const getVendorPricing = asyncHandler(async (req: AuthRequest, res: Respo
 // ─── Vendor: Dashboard Stats ──────────────────────────────────────────────────
 
 export const getVendorDashboard = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const vendor = await Vendor.findOne({ userId: req.user!._id });
+  const vendor = await Vendor.findOne({ userId: req.user!._id })
+    .populate('campusId', 'name')
+    .populate('universityId', 'name');
   if (!vendor) throw createError('Vendor not found', 404, 'VENDOR_NOT_FOUND');
 
   const today = new Date();
@@ -76,18 +78,48 @@ export const getVendorDashboard = asyncHandler(async (req: AuthRequest, res: Res
   ]);
   const todayRevenue = revenueAgg[0]?.total || 0;
 
+  // Recent jobs for quick dashboard feed
+  const recentJobs = await PrintJob.find({ vendorId: vendor._id })
+    .populate('studentId', 'name phone enrollmentNumber')
+    .populate('documentId', 'originalName pageCount fileSize')
+    .sort({ createdAt: -1 })
+    .limit(6)
+    .lean();
+
   res.json({
     success: true,
     data: {
       vendor: {
         _id: vendor._id,
         shopName: vendor.shopName,
+        ownerName: vendor.ownerName,
+        phone: vendor.phone,
+        address: vendor.address,
         availability: vendor.availability,
         status: vendor.status,
+        pricing: vendor.pricing,
+        operatingHours: vendor.operatingHours,
+        campus: vendor.campusId,
+        university: vendor.universityId,
       },
       stats: { totalToday, pending, printing, ready, completed, todayRevenue },
+      recentJobs,
     },
   });
+});
+
+// ─── Vendor: Get Profile ──────────────────────────────────────────────────────
+
+export const getVendorProfile = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const vendor = await Vendor.findOne({ userId: req.user!._id })
+    .populate('userId', 'email phone name')
+    .populate('campusId', 'name')
+    .populate('universityId', 'name')
+    .lean();
+
+  if (!vendor) throw createError('Vendor not found', 404, 'VENDOR_NOT_FOUND');
+
+  res.json({ success: true, data: { vendor } });
 });
 
 // ─── Vendor: Get Queue ────────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Download, Phone } from 'lucide-react';
+import { ArrowLeft, Phone, CreditCard, Loader2 } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import { printJobApi } from '../../api/printJobApi';
+import { paymentApi } from '../../api/paymentApi';
 import { StatusBadge, Spinner, ErrorState, TokenDisplay } from '../../components/ui';
 import { useSocket } from '../../context/SocketContext';
+import { toast } from 'sonner';
 import type { PrintJob, PrintJobStatus } from '../../types';
 
 const STATUS_STEPS: PrintJobStatus[] = ['PAYMENT_PENDING', 'QUEUED', 'ACCEPTED', 'PRINTING', 'READY', 'COLLECTED'];
@@ -34,6 +36,8 @@ const OrderDetailPage: React.FC = () => {
 
   const job: PrintJob | undefined = data?.job;
 
+  const [isPayingNow, setIsPayingNow] = useState(false);
+
   // Live updates
   useEffect(() => {
     if (!socket) return;
@@ -42,6 +46,34 @@ const OrderDetailPage: React.FC = () => {
     });
     return () => { socket.off('printJob:updated'); };
   }, [socket, id, qc]);
+
+  const loadCashfreeSDK = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      if ((window as any).Cashfree) { resolve(); return; }
+      const script = document.createElement('script');
+      script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('Failed to load Cashfree SDK'));
+      document.head.appendChild(script);
+    });
+  };
+
+  const handlePayNow = useCallback(async () => {
+    if (!job?._id) return;
+    setIsPayingNow(true);
+    try {
+      const orderRes = await paymentApi.createOrder(job._id);
+      const { paymentSessionId } = orderRes.data.data;
+      if (!paymentSessionId) throw new Error('No payment session');
+      await loadCashfreeSDK();
+      const cashfree = (window as any).Cashfree({ mode: 'sandbox' });
+      cashfree.checkout({ paymentSessionId, redirectTarget: '_self' });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to initiate payment. Please try again.');
+      setIsPayingNow(false);
+    }
+  }, [job?._id]);
 
   if (isLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}><Spinner size="lg" /></div>;
   if (error || !job) return <ErrorState message="Order not found." onRetry={() => qc.invalidateQueries({ queryKey: ['job', id] })} />;
@@ -52,6 +84,7 @@ const OrderDetailPage: React.FC = () => {
   const currentStepIdx = STATUS_STEPS.indexOf(job.status);
   const isCancelled = job.status === 'CANCELLED';
   const isReady = job.status === 'READY';
+  const isPaymentPending = job.status === 'PAYMENT_PENDING';
 
   return (
     <div className="cp-page animate-fade-in" style={{ maxWidth: 600, margin: '0 auto' }}>
@@ -59,6 +92,45 @@ const OrderDetailPage: React.FC = () => {
       <button className="cp-btn cp-btn-ghost cp-btn-sm" onClick={() => navigate(-1)} style={{ marginBottom: '1rem' }}>
         <ArrowLeft size={16} /> Back
       </button>
+      {/* Payment Pending CTA */}
+      {isPaymentPending && (
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #EEF2FF, #E0E7FF)',
+            border: '1px solid #A5B4FC',
+            borderRadius: '1rem',
+            padding: '1.5rem',
+            marginBottom: '1rem',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>💳</div>
+          <h3 style={{ margin: '0 0 0.4rem', fontWeight: 700, color: '#3730A3' }}>Payment Required</h3>
+          <p style={{ margin: '0 0 1rem', color: '#4338CA', fontSize: '0.85rem' }}>
+            Complete your UPI payment to send this job to the vendor's queue.
+          </p>
+          <button
+            id="pay-now-order-detail-btn"
+            onClick={handlePayNow}
+            disabled={isPayingNow}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.75rem 1.5rem',
+              background: '#4F46E5', color: 'white',
+              border: 'none', borderRadius: '0.75rem',
+              fontWeight: 700, fontSize: '0.95rem',
+              cursor: isPayingNow ? 'not-allowed' : 'pointer',
+              opacity: isPayingNow ? 0.7 : 1,
+            }}
+          >
+            {isPayingNow ? (
+              <><Loader2 size={18} className="animate-spin" /><span>Preparing payment...</span></>
+            ) : (
+              <><CreditCard size={18} /><span>Pay ₹{job.pricing.total} with UPI</span></>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div

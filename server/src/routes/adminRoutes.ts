@@ -12,6 +12,7 @@ import {
   updateVendorStatus,
   approveVendor,
   suspendVendor,
+  getVendorCredentials,
   getUsers,
   getStudentDetails,
   deactivateUser,
@@ -47,6 +48,7 @@ router.post('/vendors', createVendor);
 router.patch('/vendors/:id/status', updateVendorStatus);
 router.post('/vendors/:id/approve', approveVendor);
 router.post('/vendors/:id/suspend', suspendVendor);
+router.get('/vendors/:id/credentials', getVendorCredentials);
 
 // Students / Users
 router.get('/students', getUsers);

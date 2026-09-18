@@ -1,159 +1,646 @@
-import React from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { vendorApi } from '../../api/vendorApi';
-import { Spinner, PageHeader, ErrorState } from '../../components/ui';
-import { useSocket } from '../../context/SocketContext';
+import React, { useState } from 'react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import {
+  Clock,
+  Printer,
+  CheckCircle2,
+  ListOrdered,
+  IndianRupee,
+  TrendingUp,
+  ArrowRight,
+  Search,
+  FileText,
+  User as UserIcon,
+  Calendar,
+  QrCode,
+  Check,
+  Hash,
+  X,
+} from 'lucide-react';
+import { vendorApi } from '../../api/vendorApi';
+import { printJobApi } from '../../api/printJobApi';
+import { Spinner, StatusBadge, EmptyState } from '../../components/ui';
+import { useSocket } from '../../context/SocketContext';
 import { toast } from 'sonner';
+import type { PrintJob } from '../../types';
 
-const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b'];
+const QUEUE_TABS = [
+  { key: 'all', label: 'All Active' },
+  { key: 'new', label: 'New / Pending' },
+  { key: 'printing', label: 'Printing' },
+  { key: 'ready', label: 'Ready for Pickup' },
+  { key: 'completed', label: 'Completed' },
+];
 
 const VendorDashboard: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { socket } = useSocket();
 
+  // Queue state inside Dashboard
+  const [tab, setTab] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pickupModal, setPickupModal] = useState(false);
+  const [pickupToken, setPickupToken] = useState('');
+  const [verifyResult, setVerifyResult] = useState<{ job: PrintJob } | null>(null);
+
+  // Fetch Dashboard summary & stats
   const { data: dashData, isLoading: dashLoading } = useQuery({
     queryKey: ['vendorDashboard'],
-    queryFn: () => vendorApi.getDashboard().then(r => r.data.data),
-    refetchInterval: 30000,
+    queryFn: () => vendorApi.getDashboard().then((r) => r.data.data),
+    refetchInterval: 20000,
   });
 
-  const { data: analyticsData, isLoading: analyticsLoading } = useQuery({
-    queryKey: ['vendorAnalytics', '7d'],
-    queryFn: () => vendorApi.getAnalytics('7d').then(r => r.data.data),
+  // Fetch Live Queue
+  const { data: queueData, isLoading: queueLoading } = useQuery({
+    queryKey: ['vendorQueue', tab],
+    queryFn: () => vendorApi.getQueue({ status: tab, limit: 100 }).then((r) => r.data.data),
+    refetchInterval: 15000,
   });
 
+  const jobs: PrintJob[] = queueData?.jobs ?? [];
+
+  // Listen to real-time events
   React.useEffect(() => {
     if (!socket) return;
-    const refresh = () => qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+    const refresh = () => {
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+    };
     socket.on('printJob:new', refresh);
-    return () => { socket.off('printJob:new', refresh); };
+    socket.on('printJob:updated', refresh);
+    return () => {
+      socket.off('printJob:new', refresh);
+      socket.off('printJob:updated', refresh);
+    };
   }, [socket, qc]);
 
-  const availMutation = useMutation({
-    mutationFn: (av: string) => vendorApi.updateAvailability(av),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vendorDashboard'] }); toast.success('Availability updated'); },
+  const actionMutation = useMutation({
+    mutationFn: ({ action, id }: { action: string; id: string }) => {
+      const actions: Record<string, (id: string) => Promise<unknown>> = {
+        accept: printJobApi.accept,
+        start: printJobApi.start,
+        ready: printJobApi.markReady,
+      };
+      return actions[action](id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+      toast.success('Order status updated');
+    },
+    onError: () => toast.error('Action failed'),
   });
 
-  if (dashLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}><Spinner size="lg" /></div>;
+  const verifyMutation = useMutation({
+    mutationFn: (token: string) => printJobApi.verifyToken(token).then((r) => r.data.data),
+    onSuccess: (data) => setVerifyResult(data as { job: PrintJob }),
+    onError: () => toast.error('Invalid token or job is not ready for pickup'),
+  });
+
+  const collectMutation = useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) => printJobApi.collect(id, token),
+    onSuccess: () => {
+      toast.success('Order handed over successfully!');
+      setPickupModal(false);
+      setVerifyResult(null);
+      setPickupToken('');
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+    },
+    onError: () => toast.error('Confirmation failed. Please verify token.'),
+  });
+
+  if (dashLoading && queueLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   const stats = dashData?.stats;
   const vendor = dashData?.vendor;
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  // Filter jobs by search term
+  const filteredJobs = jobs.filter((job) => {
+    if (!searchTerm.trim()) return true;
+    const s = searchTerm.toLowerCase();
+    const token = job.publicToken?.toLowerCase() || '';
+    const studentObj = typeof job.studentId === 'object' ? (job.studentId as any) : null;
+    const name = (job.customerName || studentObj?.name || '').toLowerCase();
+    const identifier = (
+      job.customerIdentifier ||
+      studentObj?.enrollmentNumber ||
+      studentObj?.phone ||
+      ''
+    ).toLowerCase();
+    const doc =
+      typeof job.documentId === 'object'
+        ? (job.documentId as any)?.originalName?.toLowerCase()
+        : '';
+    return token.includes(s) || name.includes(s) || identifier.includes(s) || doc?.includes(s);
+  });
+
   return (
-    <div className="animate-fade-in">
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+    <div className="space-y-6 animate-fade-in text-left">
+      {/* ─── Top Welcome Header ─────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <h1 style={{ margin: '0 0 0.25rem', fontSize: '1.3rem' }}>
-            Good {new Date().getHours() < 12 ? 'morning' : 'afternoon'} 👋
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+            {greeting}, {vendor?.ownerName || 'Partner'} 👋
           </h1>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-            {vendor?.shopName}
+          <p className="text-sm text-slate-500 font-medium mt-1 flex items-center gap-2">
+            <span>{vendor?.shopName}</span>
+            {vendor?.campus?.name && (
+              <>
+                <span>•</span>
+                <span className="text-blue-600 font-semibold">{vendor.campus.name}</span>
+              </>
+            )}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <select
-            className="cp-select"
-            style={{ width: 'auto' }}
-            value={vendor?.availability ?? 'OPEN'}
-            onChange={e => availMutation.mutate(e.target.value)}
-            id="availability-toggle"
+
+        <div className="flex items-center gap-3">
+          <div
+            onClick={() => navigate('/vendor/analytics')}
+            className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer"
+            title="View Analytics & Earnings"
           >
-            <option value="OPEN">🟢 Open</option>
-            <option value="CLOSED">🔴 Closed</option>
-            <option value="UNAVAILABLE">🟡 Unavailable</option>
-          </select>
-          <button className="cp-btn cp-btn-primary" onClick={() => navigate('/vendor/queue')} id="view-queue-btn">
-            View Queue →
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+              <IndianRupee size={15} />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-bold text-slate-400 leading-none">
+                Today's Revenue
+              </div>
+              <div className="text-sm font-extrabold text-emerald-600 font-mono mt-0.5">
+                ₹{(stats?.todayRevenue ?? 0).toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/vendor/queue')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 shadow-xs hover:shadow-sm transition-all"
+            id="view-queue-btn"
+          >
+            <ListOrdered size={16} />
+            <span>Open Queue</span>
+            <ArrowRight size={14} />
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="cp-grid-4" style={{ marginBottom: '1.5rem', gap: '0.85rem' }}>
-        {[
-          { label: "Today's Orders", value: stats?.totalToday ?? 0, icon: '📋', color: 'var(--brand-400)' },
-          { label: 'Waiting', value: stats?.pending ?? 0, icon: '⏳', color: '#f59e0b' },
-          { label: 'Printing', value: stats?.printing ?? 0, icon: '🖨️', color: '#3b82f6' },
-          { label: 'Ready', value: stats?.ready ?? 0, icon: '✅', color: '#10b981' },
-        ].map(card => (
-          <div key={card.label} className="cp-stat" style={{ borderTop: `3px solid ${card.color}` }}>
-            <div style={{ fontSize: '1.3rem', marginBottom: '0.4rem' }}>{card.icon}</div>
-            <div className="cp-stat-value" style={{ color: card.color }}>{card.value}</div>
-            <div className="cp-stat-label">{card.label}</div>
+      {/* ─── 4 Small Metric Cards (Provided in Image) ───────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* 1. TODAY'S ORDERS */}
+        <div
+          onClick={() => setTab('all')}
+          className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:border-blue-300 hover:shadow-xs transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-blue-600 transition-colors">
+              TODAY'S ORDERS
+            </span>
+            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+              <Calendar size={14} />
+            </div>
           </div>
-        ))}
+          <div className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1.5 font-mono">
+            {stats?.totalToday ?? 0}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Total submissions</div>
+        </div>
+
+        {/* 2. WAITING IN QUEUE */}
+        <div
+          onClick={() => setTab('new')}
+          className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:border-amber-300 hover:shadow-xs transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-amber-600 transition-colors">
+              WAITING IN QUEUE
+            </span>
+            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-500 group-hover:text-white transition-colors">
+              <Clock size={14} />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-extrabold text-amber-600 mt-1.5 font-mono">
+            {stats?.pending ?? 0}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Needs acceptance</div>
+        </div>
+
+        {/* 3. READY FOR PICKUP */}
+        <div
+          onClick={() => setTab('ready')}
+          className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:border-emerald-300 hover:shadow-xs transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-emerald-600 transition-colors">
+              READY FOR PICKUP
+            </span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+              <CheckCircle2 size={14} />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-extrabold text-emerald-600 mt-1.5 font-mono">
+            {stats?.ready ?? 0}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Awaiting collection</div>
+        </div>
+
+        {/* 4. COMPLETED */}
+        <div
+          onClick={() => setTab('completed')}
+          className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:border-indigo-300 hover:shadow-xs transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider group-hover:text-indigo-600 transition-colors">
+              COMPLETED
+            </span>
+            <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+              <TrendingUp size={14} />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1.5 font-mono">
+            {stats?.completed ?? 0}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">Collected today</div>
+        </div>
       </div>
 
-      {/* Revenue + Completed */}
-      <div className="cp-grid-2" style={{ marginBottom: '1.5rem', gap: '0.85rem' }}>
-        <div className="cp-stat" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.05))', borderTop: '3px solid var(--brand-500)' }}>
-          <div style={{ fontSize: '1.2rem', marginBottom: '0.4rem' }}>💰</div>
-          <div className="cp-stat-value">₹{stats?.todayRevenue?.toFixed(0) ?? 0}</div>
-          <div className="cp-stat-label">Today's Revenue</div>
-        </div>
-        <div className="cp-stat" style={{ borderTop: '3px solid #10b981' }}>
-          <div style={{ fontSize: '1.2rem', marginBottom: '0.4rem' }}>🎯</div>
-          <div className="cp-stat-value">{stats?.completed ?? 0}</div>
-          <div className="cp-stat-label">Completed Today</div>
-        </div>
-      </div>
-
-      {/* Charts */}
-      {!analyticsLoading && analyticsData && (
-        <div className="cp-grid-2" style={{ gap: '1rem' }}>
-          {/* Revenue chart */}
-          <div className="cp-card">
-            <h3 style={{ margin: '0 0 1rem', fontSize: '0.9rem', fontWeight: 600 }}>Revenue (7 days)</h3>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={analyticsData.revenueByDay ?? []} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                <XAxis dataKey="_id" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
-                <Tooltip
-                  contentStyle={{ background: 'var(--surface-card)', border: '1px solid var(--surface-border)', borderRadius: 8 }}
-                  labelStyle={{ color: 'var(--text-secondary)', fontSize: 11 }}
-                  itemStyle={{ color: 'var(--brand-400)' }}
-                  formatter={(v: any) => [`₹${v ?? 0}`, 'Revenue']}
-                />
-                <Bar dataKey="revenue" fill="url(#brandGrad)" radius={[4, 4, 0, 0]} />
-                <defs>
-                  <linearGradient id="brandGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" />
-                    <stop offset="100%" stopColor="#8b5cf6" />
-                  </linearGradient>
-                </defs>
-              </BarChart>
-            </ResponsiveContainer>
+      {/* ─── Full Print Queue Section on Dashboard ───────────────────────────── */}
+      <div className="space-y-4">
+        {/* Controls: Tabs, Search & Verify Token Action */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+            {QUEUE_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                  tab === t.key
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
 
-          {/* Print type */}
-          <div className="cp-card">
-            <h3 style={{ margin: '0 0 1rem', fontSize: '0.9rem', fontWeight: 600 }}>Print Type Distribution</h3>
-            {(analyticsData.printTypeDistribution ?? []).length > 0 ? (
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={analyticsData.printTypeDistribution}
-                    dataKey="count"
-                    nameKey="_id"
-                    cx="50%" cy="50%" outerRadius={70}
-                    label={(entry: any) => `${entry._id || entry.name || ''}: ${entry.count ?? entry.value ?? ''}`}
-                    labelLine={false}
+          <div className="flex items-center gap-2">
+            {/* Search */}
+            <div className="relative min-w-[200px]">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Search token, student..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            {/* Verify Pickup Token Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setPickupToken('');
+                setVerifyResult(null);
+                setPickupModal(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition-colors flex-shrink-0"
+              title="Verify Pickup Token"
+            >
+              <QrCode size={14} />
+              <span className="hidden sm:inline">Verify Token</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Queue Order Cards Grid */}
+        {filteredJobs.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-2xs">
+            <EmptyState
+              title="No print jobs match this filter"
+              description="Incoming student orders will appear automatically in real-time."
+            />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredJobs.map((job) => {
+              const doc =
+                typeof job.documentId === 'object'
+                  ? (job.documentId as { originalName: string; pageCount: number; fileSize?: number })
+                  : null;
+              const studentObj =
+                typeof job.studentId === 'object'
+                  ? (job.studentId as { name?: string; phone?: string; enrollmentNumber?: string })
+                  : null;
+              const customerName = job.customerName || studentObj?.name || 'Walk-in Student';
+              const customerIdentifier =
+                job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '';
+
+              return (
+                <div
+                  key={job._id}
+                  className={`bg-white rounded-2xl border p-5 transition-all flex flex-col justify-between shadow-2xs hover:shadow-xs ${
+                    job.status === 'QUEUED'
+                      ? 'border-amber-200 bg-amber-50/10'
+                      : job.status === 'READY'
+                      ? 'border-emerald-200 bg-emerald-50/10'
+                      : 'border-slate-200'
+                  }`}
+                >
+                  <div>
+                    {/* Card Header: Public Token + Status Badge */}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="px-3 py-1 rounded-xl bg-blue-600 text-white font-extrabold text-base tracking-wider shadow-2xs font-mono">
+                          {job.publicToken}
+                        </div>
+                        <div className="text-xs text-slate-400 font-medium">
+                          {new Date(job.createdAt).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                      </div>
+                      <StatusBadge status={job.status} />
+                    </div>
+
+                    {/* Customer Information */}
+                    <div className="space-y-1 mb-3.5">
+                      <div className="flex items-center gap-2 font-bold text-sm text-slate-900">
+                        <UserIcon size={14} className="text-slate-400 flex-shrink-0" />
+                        <span className="truncate">{customerName}</span>
+                      </div>
+                      {customerIdentifier && (
+                        <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+                          <Hash size={13} className="text-slate-400 flex-shrink-0" />
+                          <span>{customerIdentifier}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Document and Print Specifications */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2 mb-4 text-xs">
+                      <div className="flex items-center gap-2 font-medium text-slate-700">
+                        <FileText size={14} className="text-blue-500 flex-shrink-0" />
+                        <span className="truncate" title={doc?.originalName}>
+                          {doc?.originalName || 'Document.pdf'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-slate-200/50">
+                        <span>
+                          {job.printConfig?.totalPages || doc?.pageCount || 1} pgs ×{' '}
+                          {job.printConfig?.copies || 1} copy
+                        </span>
+                        <span className="font-semibold text-slate-800">
+                          {job.printConfig?.colorMode === 'BW' ? 'B&W' : 'Color'} ·{' '}
+                          {job.printConfig?.sides === 'DOUBLE' ? 'Duplex' : 'Single'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-900 pt-1 font-bold">
+                        <span className="text-slate-500 font-normal">Order Total</span>
+                        <span className="text-blue-600 text-sm">₹{job.pricing?.total}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Workflow Actions */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                    {job.status === 'QUEUED' && (
+                      <button
+                        type="button"
+                        disabled={actionMutation.isPending}
+                        onClick={() => actionMutation.mutate({ action: 'accept', id: job._id })}
+                        className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+                        id={`dash-accept-${job._id}`}
+                      >
+                        Accept Order
+                      </button>
+                    )}
+
+                    {job.status === 'ACCEPTED' && (
+                      <button
+                        type="button"
+                        disabled={actionMutation.isPending}
+                        onClick={() => actionMutation.mutate({ action: 'start', id: job._id })}
+                        className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+                        id={`dash-start-${job._id}`}
+                      >
+                        Start Printing
+                      </button>
+                    )}
+
+                    {job.status === 'PRINTING' && (
+                      <button
+                        type="button"
+                        disabled={actionMutation.isPending}
+                        onClick={() => actionMutation.mutate({ action: 'ready', id: job._id })}
+                        className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
+                        id={`dash-ready-${job._id}`}
+                      >
+                        <Check size={14} />
+                        <span>Mark Ready</span>
+                      </button>
+                    )}
+
+                    {job.status === 'READY' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickupToken(job.publicToken);
+                          setVerifyResult(null);
+                          setPickupModal(true);
+                        }}
+                        className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
+                        id={`dash-collect-${job._id}`}
+                      >
+                        <QrCode size={14} />
+                        <span>Verify Handover</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/vendor/orders/${job._id}`)}
+                      className="px-3 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors"
+                    >
+                      View
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ─── Pickup Verification Modal ───────────────────────────────────────── */}
+      {pickupModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => {
+            setPickupModal(false);
+            setVerifyResult(null);
+            setPickupToken('');
+          }}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-200 shadow-xl max-w-md w-full p-6 text-left relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setPickupModal(false);
+                setVerifyResult(null);
+                setPickupToken('');
+              }}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                <QrCode size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Verify Pickup Token</h3>
+                <p className="text-xs text-slate-500">Ask the student for their 4-digit pickup code</p>
+              </div>
+            </div>
+
+            {!verifyResult ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">
+                    Student Pickup Token
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="e.g. 1048"
+                    value={pickupToken}
+                    onChange={(e) => setPickupToken(e.target.value.trim())}
+                    onKeyDown={(e) =>
+                      e.key === 'Enter' && pickupToken && verifyMutation.mutate(pickupToken)
+                    }
+                    className="w-full text-center text-3xl font-extrabold tracking-widest font-mono py-3 px-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickupModal(false);
+                      setPickupToken('');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
                   >
-                    {analyticsData.printTypeDistribution.map((_: unknown, i: number) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ background: 'var(--surface-card)', border: '1px solid var(--surface-border)', borderRadius: 8 }} />
-                </PieChart>
-              </ResponsiveContainer>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!pickupToken || verifyMutation.isPending}
+                    onClick={() => verifyMutation.mutate(pickupToken)}
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {verifyMutation.isPending ? <Spinner size="sm" /> : 'Verify Code'}
+                  </button>
+                </div>
+              </div>
             ) : (
-              <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                No data yet
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs">
+                    <CheckCircle2 size={16} />
+                    <span>Verified: Order Ready for Pickup!</span>
+                  </div>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Student Name</span>
+                      <span className="font-bold text-slate-900">
+                        {verifyResult.job.customerName ||
+                          (typeof verifyResult.job.studentId === 'object'
+                            ? (verifyResult.job.studentId as any)?.name
+                            : 'Student')}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Token</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        {verifyResult.job.publicToken}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Pages & Copies</span>
+                      <span className="font-medium text-slate-800">
+                        {verifyResult.job.printConfig?.totalPages} pages ×{' '}
+                        {verifyResult.job.printConfig?.copies}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Print Type</span>
+                      <span className="font-medium text-slate-800">
+                        {verifyResult.job.printConfig?.colorMode === 'BW' ? 'B&W' : 'Color'} ·{' '}
+                        {jobSides(verifyResult.job.printConfig?.sides)}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between pt-1 border-t border-emerald-200/60 font-bold">
+                      <span className="text-slate-700">Total Paid</span>
+                      <span className="text-emerald-700">₹{verifyResult.job.pricing?.total}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVerifyResult(null);
+                      setPickupToken('');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={collectMutation.isPending}
+                    onClick={() =>
+                      collectMutation.mutate({
+                        id: verifyResult.job._id,
+                        token: pickupToken,
+                      })
+                    }
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    {collectMutation.isPending ? <Spinner size="sm" /> : 'Confirm Handover'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -162,5 +649,7 @@ const VendorDashboard: React.FC = () => {
     </div>
   );
 };
+
+const jobSides = (sides?: string) => (sides === 'DOUBLE' ? 'Duplex' : 'Single');
 
 export default VendorDashboard;

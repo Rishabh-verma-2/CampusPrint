@@ -68,6 +68,7 @@ const vendorSchema = new mongoose_1.Schema({
     qrCode: { type: String },
     rating: { type: Number, default: 0, min: 0, max: 5 },
     totalRatings: { type: Number, default: 0 },
+    portalPassword: { type: String },
     isActive: { type: Boolean, default: true },
 }, { timestamps: true });
 vendorSchema.index({ campusId: 1, status: 1 });

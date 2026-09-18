@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateAdminSettings = exports.getAdminSettings = exports.getAuditLogs = exports.getAdminAnalytics = exports.updateComplaint = exports.getComplaints = exports.getAdminPayments = exports.getAdminOrderById = exports.getAdminOrders = exports.deactivateUser = exports.getStudentDetails = exports.getUsers = exports.createVendor = exports.suspendVendor = exports.approveVendor = exports.updateVendorStatus = exports.getAdminVendors = exports.createCampus = exports.getCampuses = exports.createUniversity = exports.getUniversityById = exports.getUniversities = exports.getAdminDashboard = void 0;
+exports.updateAdminSettings = exports.getAdminSettings = exports.getAuditLogs = exports.getAdminAnalytics = exports.updateComplaint = exports.getComplaints = exports.getAdminPayments = exports.getAdminOrderById = exports.getAdminOrders = exports.deactivateUser = exports.getStudentDetails = exports.getUsers = exports.createVendor = exports.getVendorCredentials = exports.suspendVendor = exports.approveVendor = exports.updateVendorStatus = exports.getAdminVendors = exports.createCampus = exports.getCampuses = exports.createUniversity = exports.getUniversityById = exports.getUniversities = exports.getAdminDashboard = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const errorHandler_1 = require("../middleware/errorHandler");
 const User_1 = require("../models/User");
@@ -263,8 +263,28 @@ exports.suspendVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
     await logAction(req.user._id, 'ADMIN_DEACTIVATED_VENDOR', 'Vendor', req.params.id, { shopName: vendor.shopName, reason: req.body.reason });
     res.json({ success: true, data: { vendor } });
 });
+exports.getVendorCredentials = (0, errorHandler_1.asyncHandler)(async (req, res) => {
+    const { id } = req.params;
+    const vendor = await Vendor_1.Vendor.findById(id).populate('userId', 'email phone name');
+    if (!vendor)
+        throw (0, errorHandler_1.createError)('Vendor not found', 404, 'VENDOR_NOT_FOUND');
+    const user = vendor.userId;
+    res.json({
+        success: true,
+        data: {
+            credentials: {
+                email: user?.email || '',
+                phone: vendor.phone || user?.phone || '',
+                password: vendor.portalPassword || 'Print@1931',
+                shopName: vendor.shopName,
+                ownerName: vendor.ownerName,
+            },
+        },
+        message: 'Vendor credentials retrieved successfully',
+    });
+});
 exports.createVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
-    const { shopName, ownerName, phone, email, address, bwPerPage = 1.5, colorPerPage = 5.0, duplexDiscount = 0, openTime = '08:30', closeTime = '20:00', } = req.body;
+    const { shopName, ownerName, phone, email, password, address, bwPerPage = 1.5, colorPerPage = 5.0, duplexDiscount = 0, openTime = '08:30', closeTime = '20:00', } = req.body;
     if (!shopName || !ownerName || !phone || !address) {
         throw (0, errorHandler_1.createError)('Shop name, owner name, phone number, and campus location are required', 400, 'FIELDS_REQUIRED');
     }
@@ -277,22 +297,43 @@ exports.createVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         throw (0, errorHandler_1.createError)('University or campus configuration missing', 500, 'CONFIG_ERROR');
     }
     const vendorPhone = phone.trim();
-    const vendorEmail = email && email.trim() ? email.trim().toLowerCase() : `vendor_${Date.now()}@parul.campusprint.in`;
+    const cleanShopSlug = shopName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
+        .slice(0, 10) || 'shop';
+    const phoneSuffix = vendorPhone.slice(-4);
+    const vendorEmail = email && email.trim()
+        ? email.trim().toLowerCase()
+        : `vendor.${cleanShopSlug}.${phoneSuffix}@campusprint.in`;
+    // Auto-generate memorable password if not provided
+    const randomPin = Math.floor(1000 + Math.random() * 9000);
+    const rawPassword = password && password.trim() ? password.trim() : `Print@${randomPin}`;
+    const saltRounds = 10;
+    const passwordHash = await bcryptjs_1.default.hash(rawPassword, saltRounds);
     // Check if user already exists
     let vendorUser = await User_1.User.findOne({ $or: [{ email: vendorEmail }, { phone: vendorPhone }] });
     if (!vendorUser) {
-        const saltRounds = 10;
-        const defaultPasswordHash = await bcryptjs_1.default.hash('Vendor@CampusPrint2026!', saltRounds);
         vendorUser = await User_1.User.create({
             name: ownerName.trim(),
             email: vendorEmail,
             phone: vendorPhone,
-            passwordHash: defaultPasswordHash,
+            passwordHash,
             role: 'VENDOR',
             universityId: university._id,
             campusId: campus._id,
             isActive: true,
         });
+    }
+    else {
+        // If existing user, update their role to VENDOR, assign the password & ensure active
+        vendorUser.name = ownerName.trim();
+        vendorUser.passwordHash = passwordHash;
+        vendorUser.role = 'VENDOR';
+        vendorUser.isActive = true;
+        vendorUser.universityId = university._id;
+        vendorUser.campusId = campus._id;
+        await vendorUser.save();
     }
     // Check if vendor already exists for this user
     const existingVendor = await Vendor_1.Vendor.findOne({ userId: vendorUser._id });
@@ -309,6 +350,7 @@ exports.createVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         campusId: campus._id,
         status: 'ACTIVE',
         availability: 'OPEN',
+        portalPassword: rawPassword,
         pricing: {
             bwPerPage: Number(bwPerPage) || 1.5,
             colorPerPage: Number(colorPerPage) || 5.0,
@@ -329,8 +371,16 @@ exports.createVendor = (0, errorHandler_1.asyncHandler)(async (req, res) => {
     });
     res.status(201).json({
         success: true,
-        data: { vendor },
-        message: 'Vendor store generated and activated successfully',
+        data: {
+            vendor,
+            credentials: {
+                email: vendorEmail,
+                phone: vendorPhone,
+                password: rawPassword,
+                loginUrl: '/vendor/login',
+            },
+        },
+        message: 'Vendor store generated and credentials created successfully',
     });
 });
 // ─── 4. Students Management ───────────────────────────────────────────────────

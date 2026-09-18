@@ -5,3 +5,11 @@ node_modules/
 # OS files
 .DS_Store
 */.DS_Store
+
+# Environment variables
+.env
+.env.*
+*.env
+!.env.example
+server/.env
+client/.env

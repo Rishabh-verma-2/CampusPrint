@@ -322,12 +322,34 @@ export const suspendVendor = asyncHandler(async (req: AuthRequest, res: Response
   res.json({ success: true, data: { vendor } });
 });
 
+export const getVendorCredentials = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const vendor = await Vendor.findById(id).populate('userId', 'email phone name');
+  if (!vendor) throw createError('Vendor not found', 404, 'VENDOR_NOT_FOUND');
+
+  const user = vendor.userId as any;
+  res.json({
+    success: true,
+    data: {
+      credentials: {
+        email: user?.email || '',
+        phone: vendor.phone || user?.phone || '',
+        password: vendor.portalPassword || 'Print@1931',
+        shopName: vendor.shopName,
+        ownerName: vendor.ownerName,
+      },
+    },
+    message: 'Vendor credentials retrieved successfully',
+  });
+});
+
 export const createVendor = asyncHandler(async (req: AuthRequest, res: Response) => {
   const {
     shopName,
     ownerName,
     phone,
     email,
+    password,
     address,
     bwPerPage = 1.5,
     colorPerPage = 5.0,
@@ -351,23 +373,46 @@ export const createVendor = asyncHandler(async (req: AuthRequest, res: Response)
   }
 
   const vendorPhone = phone.trim();
-  const vendorEmail = email && email.trim() ? email.trim().toLowerCase() : `vendor_${Date.now()}@parul.campusprint.in`;
+  const cleanShopSlug = shopName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 10) || 'shop';
+  const phoneSuffix = vendorPhone.slice(-4);
+  const vendorEmail =
+    email && email.trim()
+      ? email.trim().toLowerCase()
+      : `vendor.${cleanShopSlug}.${phoneSuffix}@campusprint.in`;
+
+  // Auto-generate memorable password if not provided
+  const randomPin = Math.floor(1000 + Math.random() * 9000);
+  const rawPassword = password && password.trim() ? password.trim() : `Print@${randomPin}`;
+
+  const saltRounds = 10;
+  const passwordHash = await bcrypt.hash(rawPassword, saltRounds);
 
   // Check if user already exists
   let vendorUser = await User.findOne({ $or: [{ email: vendorEmail }, { phone: vendorPhone }] });
   if (!vendorUser) {
-    const saltRounds = 10;
-    const defaultPasswordHash = await bcrypt.hash('Vendor@CampusPrint2026!', saltRounds);
     vendorUser = await User.create({
       name: ownerName.trim(),
       email: vendorEmail,
       phone: vendorPhone,
-      passwordHash: defaultPasswordHash,
+      passwordHash,
       role: 'VENDOR',
       universityId: university._id,
       campusId: campus._id,
       isActive: true,
     });
+  } else {
+    // If existing user, update their role to VENDOR, assign the password & ensure active
+    vendorUser.name = ownerName.trim();
+    vendorUser.passwordHash = passwordHash;
+    vendorUser.role = 'VENDOR';
+    vendorUser.isActive = true;
+    vendorUser.universityId = university._id;
+    vendorUser.campusId = campus._id;
+    await vendorUser.save();
   }
 
   // Check if vendor already exists for this user
@@ -386,6 +431,7 @@ export const createVendor = asyncHandler(async (req: AuthRequest, res: Response)
     campusId: campus._id,
     status: 'ACTIVE',
     availability: 'OPEN',
+    portalPassword: rawPassword,
     pricing: {
       bwPerPage: Number(bwPerPage) || 1.5,
       colorPerPage: Number(colorPerPage) || 5.0,
@@ -408,8 +454,16 @@ export const createVendor = asyncHandler(async (req: AuthRequest, res: Response)
 
   res.status(201).json({
     success: true,
-    data: { vendor },
-    message: 'Vendor store generated and activated successfully',
+    data: {
+      vendor,
+      credentials: {
+        email: vendorEmail,
+        phone: vendorPhone,
+        password: rawPassword,
+        loginUrl: '/vendor/login',
+      },
+    },
+    message: 'Vendor store generated and credentials created successfully',
   });
 });
 

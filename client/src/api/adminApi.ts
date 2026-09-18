@@ -24,6 +24,8 @@ export const adminApi = {
   approveVendor: (id: string) => apiClient.post(`/admin/vendors/${id}/approve`),
   suspendVendor: (id: string, reason?: string) =>
     apiClient.post(`/admin/vendors/${id}/suspend`, { reason }),
+  getVendorCredentials: (id: string) =>
+    apiClient.get(`/admin/vendors/${id}/credentials`),
 
   // Students & Users
   getStudents: (params?: { search?: string; page?: number; limit?: number }) =>

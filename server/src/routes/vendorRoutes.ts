@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireVendor } from '../middleware/authenticate';
 import {
   getVendors, getVendorById, getVendorPricing,
-  getVendorDashboard, getVendorQueue,
+  getVendorDashboard, getVendorQueue, getVendorProfile,
   updateVendorPricing, updateVendorAvailability, updateVendorProfile,
   getVendorAnalytics,
 } from '../controllers/vendorController';
@@ -16,6 +16,7 @@ router.get('/:id/pricing', getVendorPricing);
 
 // Vendor-protected
 router.get('/me/dashboard', authenticate, requireVendor, getVendorDashboard);
+router.get('/me/profile', authenticate, requireVendor, getVendorProfile);
 router.get('/me/queue', authenticate, requireVendor, getVendorQueue);
 router.get('/me/analytics', authenticate, requireVendor, getVendorAnalytics);
 router.patch('/me/pricing', authenticate, requireVendor, updateVendorPricing);

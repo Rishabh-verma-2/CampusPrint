@@ -13,6 +13,9 @@ export declare const env: {
     CASHFREE_APP_ID: string;
     CASHFREE_SECRET_KEY: string;
     CASHFREE_ENV: string;
+    CASHFREE_API_VERSION: string;
+    BACKEND_URL: string;
+    FRONTEND_URL: string;
     RESEND_API_KEY: string;
     SOCKET_CORS_ORIGIN: string;
     UPLOADS_DIR: string;

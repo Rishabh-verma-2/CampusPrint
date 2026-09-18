@@ -33,6 +33,10 @@ exports.env = {
     CASHFREE_APP_ID: optional('CASHFREE_APP_ID', ''),
     CASHFREE_SECRET_KEY: optional('CASHFREE_SECRET_KEY', ''),
     CASHFREE_ENV: optional('CASHFREE_ENV', 'TEST'),
+    CASHFREE_API_VERSION: optional('CASHFREE_API_VERSION', '2025-01-01'),
+    // Public URLs used to build return_url and notify_url for Cashfree
+    BACKEND_URL: optional('BACKEND_URL', 'http://localhost:5001'),
+    FRONTEND_URL: optional('FRONTEND_URL', 'http://localhost:5173'),
     RESEND_API_KEY: optional('RESEND_API_KEY', ''),
     SOCKET_CORS_ORIGIN: optional('SOCKET_CORS_ORIGIN', 'http://localhost:5173'),
     UPLOADS_DIR: optional('UPLOADS_DIR', 'uploads'),

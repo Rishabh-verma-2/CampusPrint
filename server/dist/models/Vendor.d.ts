@@ -17,6 +17,7 @@ export interface IVendor extends Document {
     qrCode?: string;
     rating: number;
     totalRatings: number;
+    portalPassword?: string;
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;

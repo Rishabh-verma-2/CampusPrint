@@ -20,6 +20,7 @@ router.post('/vendors', adminController_1.createVendor);
 router.patch('/vendors/:id/status', adminController_1.updateVendorStatus);
 router.post('/vendors/:id/approve', adminController_1.approveVendor);
 router.post('/vendors/:id/suspend', adminController_1.suspendVendor);
+router.get('/vendors/:id/credentials', adminController_1.getVendorCredentials);
 // Students / Users
 router.get('/students', adminController_1.getUsers);
 router.get('/students/:id', adminController_1.getStudentDetails);

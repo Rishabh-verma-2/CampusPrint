@@ -1,35 +1,53 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Search, CheckCircle2, Check, ArrowRight, User as UserIcon, Hash, FileText, Printer, Clock } from 'lucide-react';
+import {
+  Search,
+  CheckCircle2,
+  Check,
+  ArrowRight,
+  User as UserIcon,
+  Hash,
+  FileText,
+  Printer,
+  Clock,
+  Sparkles,
+  QrCode,
+  X,
+  Phone,
+  AlertCircle,
+  ExternalLink,
+} from 'lucide-react';
 import { vendorApi } from '../../api/vendorApi';
 import { printJobApi } from '../../api/printJobApi';
-import { StatusBadge, Spinner, EmptyState, PageHeader, ErrorState } from '../../components/ui';
+import { StatusBadge, Spinner, EmptyState } from '../../components/ui';
 import { useSocket } from '../../context/SocketContext';
 import { toast } from 'sonner';
 import type { PrintJob } from '../../types';
 
 const QUEUE_TABS = [
-  { key: 'all', label: 'Active', statuses: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY'] },
-  { key: 'new', label: 'New', statuses: ['QUEUED'] },
+  { key: 'all', label: 'All Active', statuses: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY'] },
+  { key: 'new', label: 'New / Pending', statuses: ['QUEUED'] },
   { key: 'printing', label: 'Printing', statuses: ['ACCEPTED', 'PRINTING'] },
-  { key: 'ready', label: 'Ready', statuses: ['READY'] },
-  { key: 'completed', label: 'Done', statuses: ['COLLECTED'] },
+  { key: 'ready', label: 'Ready for Pickup', statuses: ['READY'] },
+  { key: 'completed', label: 'Completed', statuses: ['COLLECTED'] },
 ];
 
 const VendorQueuePage: React.FC = () => {
-  const [tab, setTab] = React.useState('all');
-  const [pickupModal, setPickupModal] = React.useState(false);
-  const [pickupToken, setPickupToken] = React.useState('');
-  const [verifyResult, setVerifyResult] = React.useState<{ job: PrintJob } | null>(null);
+  const [tab, setTab] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pickupModal, setPickupModal] = useState(false);
+  const [pickupToken, setPickupToken] = useState('');
+  const [verifyResult, setVerifyResult] = useState<{ job: PrintJob } | null>(null);
+
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { socket } = useSocket();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['vendorQueue', tab],
-    queryFn: () => vendorApi.getQueue({ status: tab, limit: 50 }).then(r => r.data.data),
-    refetchInterval: 20000,
+    queryFn: () => vendorApi.getQueue({ status: tab, limit: 100 }).then((r) => r.data.data),
+    refetchInterval: 15000,
   });
 
   const jobs: PrintJob[] = data?.jobs ?? [];
@@ -40,7 +58,10 @@ const VendorQueuePage: React.FC = () => {
     const refresh = () => qc.invalidateQueries({ queryKey: ['vendorQueue'] });
     socket.on('printJob:new', refresh);
     socket.on('printJob:updated', refresh);
-    return () => { socket.off('printJob:new', refresh); socket.off('printJob:updated', refresh); };
+    return () => {
+      socket.off('printJob:new', refresh);
+      socket.off('printJob:updated', refresh);
+    };
   }, [socket, qc]);
 
   const actionMutation = useMutation({
@@ -52,174 +73,267 @@ const VendorQueuePage: React.FC = () => {
       };
       return actions[action](id);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['vendorQueue'] }); toast.success('Status updated'); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+      toast.success('Order status updated');
+    },
     onError: () => toast.error('Action failed'),
   });
 
   const verifyMutation = useMutation({
-    mutationFn: (token: string) => printJobApi.verifyToken(token).then(r => r.data.data),
+    mutationFn: (token: string) => printJobApi.verifyToken(token).then((r) => r.data.data),
     onSuccess: (data) => setVerifyResult(data as { job: PrintJob }),
-    onError: () => toast.error('Invalid token or job not ready'),
+    onError: () => toast.error('Invalid token or job is not ready for pickup'),
   });
 
   const collectMutation = useMutation({
     mutationFn: ({ id, token }: { id: string; token: string }) => printJobApi.collect(id, token),
     onSuccess: () => {
-      toast.success('Pickup confirmed');
+      toast.success('Order handed over successfully! Accrued to earnings.');
       setPickupModal(false);
       setVerifyResult(null);
       setPickupToken('');
       qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
     },
-    onError: () => toast.error('Collect failed'),
+    onError: () => toast.error('Confirmation failed. Please verify token.'),
   });
 
-  if (isLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}><Spinner size="lg" /></div>;
-  if (error) return <ErrorState onRetry={() => qc.invalidateQueries({ queryKey: ['vendorQueue'] })} />;
+  // Filter jobs by search term
+  const filteredJobs = jobs.filter((job) => {
+    if (!searchTerm.trim()) return true;
+    const s = searchTerm.toLowerCase();
+    const token = job.publicToken?.toLowerCase() || '';
+    const studentObj = typeof job.studentId === 'object' ? (job.studentId as any) : null;
+    const name = (job.customerName || studentObj?.name || '').toLowerCase();
+    const identifier = (job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '').toLowerCase();
+    const doc = typeof job.documentId === 'object' ? (job.documentId as any)?.originalName?.toLowerCase() : '';
+    return token.includes(s) || name.includes(s) || identifier.includes(s) || doc?.includes(s);
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   return (
-    <div className="animate-fade-in">
-      <PageHeader
-        title="Print Queue"
-        subtitle={`${jobs.length} active jobs`}
-        action={
-          <button className="cp-btn cp-btn-primary" onClick={() => setPickupModal(true)} id="verify-pickup-btn">
-            <Search size={15} />
-            <span>Verify Pickup</span>
-          </button>
-        }
-      />
+    <div className="space-y-6 animate-fade-in text-left">
+      {/* ─── Top Header ──────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-2xs">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+            Print Order Queue
+          </h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">
+            Manage incoming orders, update printing statuses, and verify pickups.
+          </p>
+        </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.25rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
-        {QUEUE_TABS.map(t => (
+        <div className="flex items-center gap-3">
           <button
-            key={t.key}
-            className={`cp-btn cp-btn-sm ${tab === t.key ? 'cp-btn-primary' : 'cp-btn-secondary'}`}
-            onClick={() => setTab(t.key)}
-            style={{ whiteSpace: 'nowrap' }}
+            type="button"
+            onClick={() => {
+              setPickupToken('');
+              setVerifyResult(null);
+              setPickupModal(true);
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 shadow-xs transition-colors"
+            id="verify-pickup-btn"
           >
-            {t.label}
+            <QrCode size={16} />
+            <span>Verify Pickup Token</span>
           </button>
-        ))}
+        </div>
       </div>
 
-      {jobs.length === 0 ? (
-        <EmptyState title="No jobs in this queue" description="New student orders will appear here automatically." />
+      {/* ─── Filter Tabs & Search Bar ────────────────────────────────────────── */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+          {QUEUE_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                tab === t.key
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Search input */}
+        <div className="relative min-w-[220px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search token, student, roll..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* ─── Order Cards Grid ────────────────────────────────────────────────── */}
+      {filteredJobs.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+          <EmptyState
+            title="No print jobs match this filter"
+            description="Incoming student orders will appear automatically in real-time."
+          />
+        </div>
       ) : (
-        <div style={{ display: 'grid', gap: '0.85rem', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
-          {jobs.map(job => {
-            const doc = typeof job.documentId === 'object' ? (job.documentId as { originalName: string; pageCount: number }) : null;
-            const studentObj = typeof job.studentId === 'object' ? (job.studentId as { name?: string; phone?: string; enrollmentNumber?: string }) : null;
-            const customerName = job.customerName || studentObj?.name || 'Student';
-            const customerIdentifier = job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '';
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredJobs.map((job) => {
+            const doc =
+              typeof job.documentId === 'object'
+                ? (job.documentId as { originalName: string; pageCount: number; fileSize?: number })
+                : null;
+            const studentObj =
+              typeof job.studentId === 'object'
+                ? (job.studentId as { name?: string; phone?: string; enrollmentNumber?: string })
+                : null;
+            const customerName = job.customerName || studentObj?.name || 'Walk-in Student';
+            const customerIdentifier =
+              job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '';
 
             return (
               <div
                 key={job._id}
-                className="cp-card"
-                style={{
-                  border: job.status === 'QUEUED' ? '1px solid rgba(99,102,241,0.3)' :
-                    job.status === 'READY' ? '1px solid rgba(16,185,129,0.3)' : '1px solid var(--surface-border)',
-                  background: job.status === 'READY' ? 'linear-gradient(135deg, rgba(16,185,129,0.06), transparent)' : undefined,
-                }}
+                className={`bg-white rounded-2xl border p-5 transition-all flex flex-col justify-between shadow-2xs hover:shadow-xs ${
+                  job.status === 'QUEUED'
+                    ? 'border-amber-200 bg-amber-50/10'
+                    : job.status === 'READY'
+                    ? 'border-emerald-200 bg-emerald-50/10'
+                    : 'border-slate-200'
+                }`}
               >
-                {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
-                  <div>
-                    {/* Pure numeric token */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                      <span
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          padding: '0.25rem 0.65rem', borderRadius: '8px',
-                          background: 'var(--gradient-brand)', color: 'white',
-                          fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '1.25rem', letterSpacing: '0.05em',
-                        }}
-                      >
+                <div>
+                  {/* Card Header: Public Token + Status Badge */}
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="px-3 py-1 rounded-xl bg-blue-600 text-white font-extrabold text-base tracking-wider shadow-2xs font-mono">
                         {job.publicToken}
+                      </div>
+                      <div className="text-xs text-slate-400 font-medium">
+                        {new Date(job.createdAt).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    </div>
+                    <StatusBadge status={job.status} />
+                  </div>
+
+                  {/* Customer Information */}
+                  <div className="space-y-1 mb-3.5">
+                    <div className="flex items-center gap-2 font-bold text-sm text-slate-900">
+                      <UserIcon size={14} className="text-slate-400 flex-shrink-0" />
+                      <span className="truncate">{customerName}</span>
+                    </div>
+                    {customerIdentifier && (
+                      <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+                        <Hash size={13} className="text-slate-400 flex-shrink-0" />
+                        <span>{customerIdentifier}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Document and Print Specifications */}
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2 mb-4 text-xs">
+                    <div className="flex items-center gap-2 font-medium text-slate-700">
+                      <FileText size={14} className="text-blue-500 flex-shrink-0" />
+                      <span className="truncate" title={doc?.originalName}>
+                        {doc?.originalName || 'Document.pdf'}
                       </span>
                     </div>
 
-                    {/* Student Identification */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                      <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <UserIcon size={14} className="text-slate-400" />
-                        {customerName}
+                    <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-slate-200/50">
+                      <span>
+                        {job.printConfig?.totalPages || doc?.pageCount || 1} pgs ×{' '}
+                        {job.printConfig?.copies || 1} copy
                       </span>
-                      {customerIdentifier && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                          <Hash size={13} className="text-slate-400" />
-                          {customerIdentifier}
-                        </span>
-                      )}
+                      <span className="font-semibold text-slate-800">
+                        {job.printConfig?.colorMode === 'BW' ? 'B&W' : 'Color'} ·{' '}
+                        {job.printConfig?.sides === 'DOUBLE' ? 'Duplex' : 'Single'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-slate-900 pt-1 font-bold">
+                      <span className="text-slate-500 font-normal">Order Total</span>
+                      <span className="text-blue-600 text-sm">₹{job.pricing?.total}</span>
                     </div>
                   </div>
-                  <StatusBadge status={job.status} />
                 </div>
 
-                {/* Details */}
-                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.85rem', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  <span>{doc?.pageCount ?? '?'} pages</span>
-                  <span>{job.printConfig.colorMode === 'BW' ? 'B&W' : 'Color'}</span>
-                  <span>{job.printConfig.sides === 'DOUBLE' ? 'Double-sided' : 'Single-sided'}</span>
-                  <span>× {job.printConfig.copies}</span>
-                  <span style={{ color: 'var(--brand-500)', fontWeight: 700 }}>₹{job.pricing.total}</span>
-                </div>
-
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <FileText size={13} />
-                  <span>{doc?.originalName ?? 'document.pdf'}</span>
-                  <span>·</span>
-                  <span>{new Date(job.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {/* Workflow Actions */}
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
                   {job.status === 'QUEUED' && (
                     <button
-                      className="cp-btn cp-btn-primary cp-btn-sm"
+                      type="button"
                       disabled={actionMutation.isPending}
                       onClick={() => actionMutation.mutate({ action: 'accept', id: job._id })}
+                      className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors shadow-2xs"
                       id={`accept-${job._id}`}
                     >
-                      Accept
+                      Accept Order
                     </button>
                   )}
+
                   {job.status === 'ACCEPTED' && (
                     <button
-                      className="cp-btn cp-btn-success cp-btn-sm"
+                      type="button"
                       disabled={actionMutation.isPending}
                       onClick={() => actionMutation.mutate({ action: 'start', id: job._id })}
+                      className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-2xs"
                       id={`start-${job._id}`}
                     >
                       Start Printing
                     </button>
                   )}
+
                   {job.status === 'PRINTING' && (
                     <button
-                      className="cp-btn cp-btn-primary cp-btn-sm"
+                      type="button"
                       disabled={actionMutation.isPending}
                       onClick={() => actionMutation.mutate({ action: 'ready', id: job._id })}
+                      className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
                       id={`ready-${job._id}`}
                     >
-                      <Check size={14} /> Mark Ready
+                      <Check size={14} />
+                      <span>Mark Ready</span>
                     </button>
                   )}
+
                   {job.status === 'READY' && (
                     <button
-                      className="cp-btn cp-btn-success cp-btn-sm"
-                      onClick={() => { setPickupToken(job.publicToken); setPickupModal(true); }}
+                      type="button"
+                      onClick={() => {
+                        setPickupToken(job.publicToken);
+                        setVerifyResult(null);
+                        setPickupModal(true);
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
                       id={`collect-${job._id}`}
                     >
-                      Verify Pickup
+                      <QrCode size={14} />
+                      <span>Verify Handover</span>
                     </button>
                   )}
+
                   <button
-                    className="cp-btn cp-btn-ghost cp-btn-sm"
+                    type="button"
                     onClick={() => navigate(`/vendor/orders/${job._id}`)}
+                    className="px-3 py-2 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-semibold transition-colors"
                   >
-                    Details
+                    View
                   </button>
                 </div>
               </div>
@@ -228,74 +342,150 @@ const VendorQueuePage: React.FC = () => {
         </div>
       )}
 
-      {/* Pickup Verification Modal */}
+      {/* ─── Pickup Verification Modal ───────────────────────────────────────── */}
       {pickupModal && (
-        <div className="cp-modal-overlay" onClick={() => { setPickupModal(false); setVerifyResult(null); setPickupToken(''); }}>
-          <div className="cp-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.2rem', fontWeight: 700 }}>Verify Pickup Number</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-              Enter the student's pickup number to verify order handover.
-            </p>
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => {
+            setPickupModal(false);
+            setVerifyResult(null);
+            setPickupToken('');
+          }}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-200 shadow-xl max-w-md w-full p-6 text-left relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setPickupModal(false);
+                setVerifyResult(null);
+                setPickupToken('');
+              }}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                <QrCode size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Verify Pickup Token</h3>
+                <p className="text-xs text-slate-500">Ask the student for their 4-digit pickup code</p>
+              </div>
+            </div>
 
             {!verifyResult ? (
-              <>
-                <input
-                  className="cp-input"
-                  placeholder="e.g. 1048"
-                  type="text"
-                  inputMode="numeric"
-                  value={pickupToken}
-                  onChange={e => setPickupToken(e.target.value.trim())}
-                  onKeyDown={e => e.key === 'Enter' && verifyMutation.mutate(pickupToken)}
-                  style={{ marginBottom: '1rem', fontSize: '1.5rem', fontFamily: 'var(--font-display)', fontWeight: 800, letterSpacing: '0.1em', textAlign: 'center' }}
-                  id="pickup-token-input"
-                  autoFocus
-                />
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="cp-btn cp-btn-ghost" style={{ flex: 1 }} onClick={() => { setPickupModal(false); setPickupToken(''); }}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">
+                    Student Pickup Token
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="e.g. 1048"
+                    value={pickupToken}
+                    onChange={(e) => setPickupToken(e.target.value.trim())}
+                    onKeyDown={(e) => e.key === 'Enter' && pickupToken && verifyMutation.mutate(pickupToken)}
+                    className="w-full text-center text-3xl font-extrabold tracking-widest font-mono py-3 px-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickupModal(false);
+                      setPickupToken('');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                  >
                     Cancel
                   </button>
                   <button
-                    className="cp-btn cp-btn-primary"
-                    style={{ flex: 1 }}
+                    type="button"
                     disabled={!pickupToken || verifyMutation.isPending}
                     onClick={() => verifyMutation.mutate(pickupToken)}
-                    id="verify-token-btn"
+                    className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    {verifyMutation.isPending ? <Spinner size="sm" /> : 'Verify Number'}
+                    {verifyMutation.isPending ? <Spinner size="sm" /> : 'Verify Code'}
                   </button>
                 </div>
-              </>
+              </div>
             ) : (
-              <div>
-                <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '12px', padding: '1rem', marginBottom: '1rem' }}>
-                  <div style={{ color: '#10b981', fontWeight: 600, marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <CheckCircle2 size={16} /> Valid Print Job Ready for Pickup
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-xs">
+                    <CheckCircle2 size={16} />
+                    <span>Verified: Order Ready for Pickup!</span>
                   </div>
-                  {[
-                    { l: 'Pickup Number', v: verifyResult.job.publicToken },
-                    { l: 'Customer Name', v: verifyResult.job.customerName || (typeof verifyResult.job.studentId === 'object' ? (verifyResult.job.studentId as { name?: string }).name : 'Student') },
-                    { l: 'Enrollment / Mobile', v: verifyResult.job.customerIdentifier || (typeof verifyResult.job.studentId === 'object' ? ((verifyResult.job.studentId as { enrollmentNumber?: string }).enrollmentNumber || (verifyResult.job.studentId as { phone?: string }).phone) : '—') },
-                    { l: 'Total Pages', v: `${verifyResult.job.printConfig.totalPages}` },
-                    { l: 'Print Type', v: verifyResult.job.printConfig.colorMode === 'BW' ? 'Black & White' : 'Color' },
-                    { l: 'Sides', v: verifyResult.job.printConfig.sides === 'DOUBLE' ? 'Double-sided' : 'Single-sided' },
-                  ].map(item => (
-                    <div key={item.l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', padding: '0.25rem 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>{item.l}</span>
-                      <span style={{ fontWeight: 600 }}>{item.v}</span>
+
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Student Name</span>
+                      <span className="font-bold text-slate-900">
+                        {verifyResult.job.customerName ||
+                          (typeof verifyResult.job.studentId === 'object'
+                            ? (verifyResult.job.studentId as any)?.name
+                            : 'Student')}
+                      </span>
                     </div>
-                  ))}
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Token</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        {verifyResult.job.publicToken}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Pages & Copies</span>
+                      <span className="font-medium text-slate-800">
+                        {verifyResult.job.printConfig?.totalPages} pages ×{' '}
+                        {verifyResult.job.printConfig?.copies}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Print Type</span>
+                      <span className="font-medium text-slate-800">
+                        {verifyResult.job.printConfig?.colorMode === 'BW' ? 'B&W' : 'Color'} ·{' '}
+                        {verifyResult.job.printConfig?.sides === 'DOUBLE' ? 'Duplex' : 'Single'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between pt-1 border-t border-emerald-200/60 font-bold">
+                      <span className="text-slate-700">Total Paid</span>
+                      <span className="text-emerald-700">₹{verifyResult.job.pricing?.total}</span>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
-                  <button className="cp-btn cp-btn-ghost" style={{ flex: 1 }} onClick={() => { setVerifyResult(null); setPickupToken(''); }}>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVerifyResult(null);
+                      setPickupToken('');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                  >
                     Back
                   </button>
                   <button
-                    className="cp-btn cp-btn-success"
-                    style={{ flex: 1 }}
+                    type="button"
                     disabled={collectMutation.isPending}
-                    onClick={() => collectMutation.mutate({ id: verifyResult.job._id, token: pickupToken })}
-                    id="confirm-handover-btn"
+                    onClick={() =>
+                      collectMutation.mutate({
+                        id: verifyResult.job._id,
+                        token: pickupToken,
+                      })
+                    }
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
                   >
                     {collectMutation.isPending ? <Spinner size="sm" /> : 'Confirm Handover'}
                   </button>
@@ -310,4 +500,3 @@ const VendorQueuePage: React.FC = () => {
 };
 
 export default VendorQueuePage;
-

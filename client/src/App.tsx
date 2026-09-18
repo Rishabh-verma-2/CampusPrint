@@ -26,6 +26,7 @@ const StudentOrders = lazy(() => import('./pages/student/OrdersPage'));
 const StudentOrderDetail = lazy(() => import('./pages/student/OrderDetailPage'));
 const StudentProfile = lazy(() => import('./pages/student/ProfilePage'));
 const StudentNotifications = lazy(() => import('./pages/student/NotificationsPage'));
+const PaymentReturnPage = lazy(() => import('./pages/student/PaymentReturnPage'));
 
 // Vendor pages
 const VendorDashboard = lazy(() => import('./pages/vendor/DashboardPage'));
@@ -135,13 +136,23 @@ const AppRoutes: React.FC = () => (
         <Route path="notifications" element={<StudentNotifications />} />
       </Route>
 
+      {/* Payment Return — standalone page (no sidebar) */}
+      <Route
+        path="/payment/return"
+        element={
+          <RequireAuth role="STUDENT">
+            <PaymentReturnPage />
+          </RequireAuth>
+        }
+      />
+
       {/* Vendor */}
       <Route path="/vendor" element={<RequireAuth role="VENDOR"><VendorLayout /></RequireAuth>}>
         <Route index element={<VendorDashboard />} />
         <Route path="queue" element={<VendorQueue />} />
         <Route path="orders/:id" element={<VendorOrderDetail />} />
         <Route path="analytics" element={<VendorAnalytics />} />
-        <Route path="earnings" element={<VendorEarnings />} />
+        <Route path="earnings" element={<Navigate to="/vendor/analytics" replace />} />
         <Route path="pricing" element={<VendorPricing />} />
         <Route path="profile" element={<VendorProfile />} />
       </Route>

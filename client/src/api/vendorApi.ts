@@ -13,6 +13,7 @@ export const vendorApi = {
 
   // Vendor dashboard
   getDashboard: () => apiClient.get('/vendors/me/dashboard'),
+  getProfile: () => apiClient.get('/vendors/me/profile'),
   getQueue: (params?: { status?: string; page?: number; limit?: number; sort?: string }) =>
     apiClient.get('/vendors/me/queue', { params }),
   getAnalytics: (period?: string) =>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireStudent, requireVendor } from '../middleware/authenticate';
 import {
-  createPrintJob, getMyPrintJobs, getPrintJob,
+  createPrintJob, getMyPrintJobs, getPrintJob, downloadPrintJobFile,
   acceptPrintJob, startPrinting, markReady,
   cancelPrintJob, collectPrintJob, verifyPickupToken, reportProblem,
 } from '../controllers/printJobController';
@@ -12,6 +12,7 @@ const router = Router();
 router.post('/', authenticate, requireStudent, createPrintJob);
 router.get('/', authenticate, getMyPrintJobs);
 router.get('/:id', authenticate, getPrintJob);
+router.get('/:id/file', authenticate, downloadPrintJobFile);
 router.post('/:id/cancel', authenticate, cancelPrintJob);
 
 // Vendor

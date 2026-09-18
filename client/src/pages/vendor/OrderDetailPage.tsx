@@ -12,9 +12,14 @@ import {
   Printer,
   Clock,
   ExternalLink,
+  Layers,
+  Sparkles,
+  QrCode,
+  X,
 } from 'lucide-react';
 import { printJobApi } from '../../api/printJobApi';
 import { StatusBadge, Spinner, ErrorState } from '../../components/ui';
+import { ErrorBoundary } from '../../components/common/ErrorBoundary';
 import { toast } from 'sonner';
 import type { PrintJob } from '../../types';
 
@@ -27,7 +32,7 @@ const VendorOrderDetailPage: React.FC = () => {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['vendorJob', id],
-    queryFn: () => printJobApi.getById(id!).then(r => r.data.data),
+    queryFn: () => printJobApi.getById(id!).then((r) => r.data.data),
     enabled: !!id,
     refetchInterval: 15000,
   });
@@ -46,7 +51,9 @@ const VendorOrderDetailPage: React.FC = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['vendorJob', id] });
-      toast.success('Job status updated');
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+      toast.success('Order status updated');
     },
     onError: () => toast.error('Action failed'),
   });
@@ -54,225 +61,338 @@ const VendorOrderDetailPage: React.FC = () => {
   const collectMutation = useMutation({
     mutationFn: (token: string) => printJobApi.collect(id!, token),
     onSuccess: () => {
-      toast.success('Pickup confirmed and completed');
+      toast.success('Pickup confirmed and order completed!');
       setShowHandoverModal(false);
       qc.invalidateQueries({ queryKey: ['vendorJob', id] });
+      qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
     },
-    onError: () => toast.error('Invalid token or pickup failed'),
+    onError: () => toast.error('Invalid token or pickup confirmation failed'),
   });
 
-  if (isLoading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}><Spinner size="lg" /></div>;
-  if (error || !job) return <ErrorState message="Order not found." onRetry={() => qc.invalidateQueries({ queryKey: ['vendorJob', id] })} />;
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
-  const doc = typeof job.documentId === 'object' ? (job.documentId as { originalName: string; pageCount: number; fileSize: number; fileUrl?: string }) : null;
-  const studentObj = typeof job.studentId === 'object' ? (job.studentId as { name?: string; phone?: string; enrollmentNumber?: string }) : null;
+  if (error || !job) {
+    return (
+      <ErrorState
+        message="Print order not found or deleted."
+        onRetry={() => qc.invalidateQueries({ queryKey: ['vendorJob', id] })}
+      />
+    );
+  }
+
+  const doc =
+    typeof job.documentId === 'object'
+      ? (job.documentId as { originalName: string; pageCount: number; fileSize?: number; fileUrl?: string })
+      : null;
+  const studentObj =
+    typeof job.studentId === 'object'
+      ? (job.studentId as { name?: string; phone?: string; enrollmentNumber?: string })
+      : null;
 
   const customerName = job.customerName || studentObj?.name || 'Walk-in Student';
-  const customerIdentifier = job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '';
-  const customerPhone = job.customerPhone || studentObj?.phone || '';
+  const customerPhone = job.customerPhone || studentObj?.phone;
+  const customerIdentifier =
+    job.customerIdentifier || studentObj?.enrollmentNumber || customerPhone || '';
+  const targetFileUrl =
+    documentUrl || doc?.fileUrl || (job?._id ? `/api/print-jobs/${job._id}/file` : undefined);
 
   return (
-    <div className="cp-page animate-fade-in" style={{ maxWidth: 640, margin: '0 auto', padding: '1rem 1rem 3rem' }}>
-      {/* Back link */}
+    <ErrorBoundary fallbackTitle="Could not display order details">
+      <div className="max-w-3xl mx-auto space-y-6 animate-fade-in text-left pb-12">
+      {/* ─── Back Navigation ─────────────────────────────────────────────────── */}
       <button
-        className="cp-btn cp-btn-ghost cp-btn-sm"
+        type="button"
         onClick={() => navigate('/vendor/queue')}
-        style={{ marginBottom: '1.25rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+        className="inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
       >
-        <ArrowLeft size={16} /> Back to Queue
+        <ArrowLeft size={16} />
+        <span>Back to Print Queue</span>
       </button>
 
-      {/* Header Card */}
-      <div className="cp-card" style={{ marginBottom: '1rem', padding: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
-              Pickup Number
-            </span>
-            <div
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 800,
-                fontSize: '2.2rem',
-                color: 'var(--brand-500)',
-                lineHeight: 1.1,
-                marginTop: '0.2rem',
-              }}
-            >
-              {job.publicToken}
-            </div>
+      {/* ─── Top Token Card ─────────────────────────────────────────────────── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Pickup Number
+          </span>
+          <div className="text-4xl font-extrabold text-blue-600 font-mono tracking-wider mt-1">
+            {job.publicToken}
           </div>
+          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+            <Clock size={13} />
+            <span>Ordered on {new Date(job.createdAt).toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:items-end gap-2">
           <StatusBadge status={job.status} />
+          <div className="text-xs font-medium text-slate-500">
+            Payment Status: <span className="font-semibold text-emerald-600">PAID</span>
+          </div>
         </div>
       </div>
 
-      {/* Customer Information Card */}
-      <div className="cp-card" style={{ marginBottom: '1rem', padding: '1.25rem' }}>
-        <h3 style={{ margin: '0 0 0.85rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Customer Details
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
-            <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <UserIcon size={15} className="text-slate-400" /> Name
-            </span>
-            <span style={{ fontWeight: 600 }}>{customerName}</span>
+      {/* ─── Customer Details Card ───────────────────────────────────────────── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
+        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+          Student Information
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center flex-shrink-0">
+              <UserIcon size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 font-medium">Customer Name</div>
+              <div className="text-sm font-bold text-slate-900">{customerName}</div>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
-            <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Hash size={15} className="text-slate-400" /> Enrollment / Mobile
-            </span>
-            <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{customerIdentifier || '—'}</span>
+          <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
+              <Hash size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 font-medium">Enrollment / Mobile</div>
+              <div className="text-sm font-bold font-mono text-slate-900">
+                {customerIdentifier || '—'}
+              </div>
+            </div>
           </div>
 
           {customerPhone && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.875rem' }}>
-              <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Phone size={15} className="text-slate-400" /> Contact Number
-              </span>
-              <a href={`tel:${customerPhone}`} style={{ color: 'var(--brand-500)', fontWeight: 600 }}>
-                {customerPhone}
-              </a>
+            <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-100 sm:col-span-2">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                <Phone size={16} />
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-500 font-medium">Direct Phone Number</div>
+                <a
+                  href={`tel:${customerPhone}`}
+                  className="text-sm font-bold text-blue-600 hover:underline"
+                >
+                  {customerPhone}
+                </a>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Print Document & File Card */}
-      <div className="cp-card" style={{ marginBottom: '1rem', padding: '1.25rem' }}>
-        <h3 style={{ margin: '0 0 0.85rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+      {/* ─── Document & Download File Card ───────────────────────────────────── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
+        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
           Document to Print
-        </h3>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', background: 'var(--surface-raised)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <FileText size={24} className="text-blue-500" />
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{doc?.originalName ?? 'document.pdf'}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {job.printConfig.totalPages} total pages · {job.printConfig.pageRanges === 'all' ? 'All pages' : `Pages ${job.printConfig.pageRanges}`}
+        </h2>
+
+        <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+              <FileText size={20} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-slate-900 truncate">
+                {doc?.originalName || 'Document.pdf'}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {job.printConfig?.totalPages || doc?.pageCount || 1} pages ·{' '}
+                {job.printConfig?.pageRanges === 'all'
+                  ? 'All pages'
+                  : `Pages: ${job.printConfig?.pageRanges}`}
               </div>
             </div>
           </div>
 
-          {(documentUrl || doc?.fileUrl) && (
+          {targetFileUrl && (
             <a
-              href={documentUrl || doc?.fileUrl}
+              href={targetFileUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="cp-btn cp-btn-primary cp-btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors flex-shrink-0"
             >
-              <Download size={14} />
+              <Download size={15} />
               <span>Open / Download PDF</span>
+              <ExternalLink size={13} />
             </a>
           )}
         </div>
       </div>
 
-      {/* Print Specifications Card */}
-      <div className="cp-card" style={{ marginBottom: '1rem', padding: '1.25rem' }}>
-        <h3 style={{ margin: '0 0 0.85rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+      {/* ─── Print Specifications & Pricing ──────────────────────────────────── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
+        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
           Print Specifications
-        </h3>
-        {[
-          { label: 'Color Mode', value: job.printConfig.colorMode === 'BW' ? 'Black & White' : 'Color' },
-          { label: 'Sides', value: job.printConfig.sides === 'DOUBLE' ? 'Double-sided (Duplex)' : 'Single-sided' },
-          { label: 'Copies', value: `${job.printConfig.copies} copy(s)` },
-          { label: 'Pages per Copy', value: `${job.printConfig.totalPages} pages` },
-          { label: 'Total Amount', value: `₹${job.pricing.total}` },
-        ].map(item => (
-          <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.35rem 0', fontSize: '0.85rem', borderBottom: '1px solid var(--surface-border)' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
-            <span style={{ fontWeight: 600 }}>{item.value}</span>
+        </h2>
+
+        <div className="divide-y divide-slate-100 text-xs">
+          <div className="py-2.5 flex justify-between items-center">
+            <span className="text-slate-500">Color Mode</span>
+            <span className="font-bold text-slate-900">
+              {job.printConfig?.colorMode === 'BW' ? 'Black & White' : 'Color'}
+            </span>
           </div>
-        ))}
+
+          <div className="py-2.5 flex justify-between items-center">
+            <span className="text-slate-500">Page Layout</span>
+            <span className="font-bold text-slate-900">
+              {job.printConfig?.sides === 'DOUBLE' ? 'Double-sided (Duplex)' : 'Single-sided'}
+            </span>
+          </div>
+
+          <div className="py-2.5 flex justify-between items-center">
+            <span className="text-slate-500">Copies</span>
+            <span className="font-bold text-slate-900">{job.printConfig?.copies || 1} copies</span>
+          </div>
+
+          <div className="py-2.5 flex justify-between items-center">
+            <span className="text-slate-500">Pages per Copy</span>
+            <span className="font-bold text-slate-900">
+              {job.printConfig?.totalPages || 1} pages
+            </span>
+          </div>
+
+          <div className="py-2.5 flex justify-between items-center">
+            <span className="text-slate-500">Total Print Sheets</span>
+            <span className="font-bold text-slate-900">
+              {job.printConfig?.sides === 'DOUBLE'
+                ? Math.ceil((job.printConfig?.totalPages || 1) / 2) * (job.printConfig?.copies || 1)
+                : (job.printConfig?.totalPages || 1) * (job.printConfig?.copies || 1)}{' '}
+              sheets
+            </span>
+          </div>
+
+          <div className="py-3 flex justify-between items-center text-sm font-bold text-slate-900 pt-3">
+            <span>Total Order Paid</span>
+            <span className="text-blue-600 text-base">₹{job.pricing?.total ?? 0}</span>
+          </div>
+        </div>
       </div>
 
-      {/* Workflow Action Bar */}
-      <div className="cp-card" style={{ padding: '1.25rem' }}>
-        <h3 style={{ margin: '0 0 0.85rem', fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Process Order
-        </h3>
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+      {/* ─── Workflow Processing Action Bar ──────────────────────────────────── */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xs space-y-4">
+        <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+          Process Print Order
+        </h2>
+
+        <div className="flex flex-wrap gap-3">
           {job.status === 'QUEUED' && (
             <button
-              className="cp-btn cp-btn-primary"
+              type="button"
               disabled={actionMutation.isPending}
               onClick={() => actionMutation.mutate('accept')}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors"
             >
               Accept Print Job
             </button>
           )}
+
           {job.status === 'ACCEPTED' && (
             <button
-              className="cp-btn cp-btn-success"
+              type="button"
               disabled={actionMutation.isPending}
               onClick={() => actionMutation.mutate('start')}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
-              Start Printing Now
+              <Printer size={15} />
+              <span>Start Printing Now</span>
             </button>
           )}
+
           {job.status === 'PRINTING' && (
             <button
-              className="cp-btn cp-btn-primary"
+              type="button"
               disabled={actionMutation.isPending}
               onClick={() => actionMutation.mutate('ready')}
+              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
-              Mark Order Ready for Pickup
+              <CheckCircle2 size={15} />
+              <span>Mark Ready for Pickup</span>
             </button>
           )}
+
           {job.status === 'READY' && (
             <button
-              className="cp-btn cp-btn-success"
+              type="button"
               onClick={() => setShowHandoverModal(true)}
+              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
-              Verify Pickup & Complete Handover
+              <QrCode size={15} />
+              <span>Verify & Complete Handover</span>
             </button>
           )}
+
           {job.status === 'COLLECTED' && (
-            <div style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, fontSize: '0.9rem' }}>
-              <CheckCircle2 size={18} /> Order Collected by Student
+            <div className="flex items-center gap-2 text-emerald-600 font-bold text-sm bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200">
+              <CheckCircle2 size={18} />
+              <span>Order Handed Over & Completed</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Handover Modal */}
+      {/* ─── Handover Confirmation Modal ─────────────────────────────────────── */}
       {showHandoverModal && (
-        <div className="cp-modal-overlay" onClick={() => setShowHandoverModal(false)}>
-          <div className="cp-modal" onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.2rem', fontWeight: 700 }}>Confirm Handover</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1rem' }}>
-              Ask student for their pickup number (should match: <strong>{job.publicToken}</strong>).
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowHandoverModal(false)}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-200 shadow-xl max-w-md w-full p-6 text-left relative"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowHandoverModal(false)}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <h3 className="text-base font-bold text-slate-900">Confirm Order Handover</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Ask student for their pickup code (expected: <strong className="font-mono text-blue-600">{job.publicToken}</strong>).
             </p>
-            <input
-              className="cp-input"
-              type="text"
-              inputMode="numeric"
-              placeholder={`Enter number (e.g. ${job.publicToken})`}
-              value={pickupTokenInput}
-              onChange={e => setPickupTokenInput(e.target.value.trim())}
-              style={{ marginBottom: '1rem', fontSize: '1.3rem', fontWeight: 700, textAlign: 'center' }}
-              autoFocus
-            />
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="cp-btn cp-btn-ghost" style={{ flex: 1 }} onClick={() => setShowHandoverModal(false)}>
-                Cancel
-              </button>
-              <button
-                className="cp-btn cp-btn-success"
-                style={{ flex: 1 }}
-                disabled={!pickupTokenInput || collectMutation.isPending}
-                onClick={() => collectMutation.mutate(pickupTokenInput)}
-              >
-                {collectMutation.isPending ? <Spinner size="sm" /> : 'Confirm Handover'}
-              </button>
+
+            <div className="mt-4 space-y-4">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder={`Enter ${job.publicToken}`}
+                value={pickupTokenInput}
+                onChange={(e) => setPickupTokenInput(e.target.value.trim())}
+                className="w-full text-center text-3xl font-extrabold tracking-widest font-mono py-3 px-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-900"
+                autoFocus
+              />
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowHandoverModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!pickupTokenInput || collectMutation.isPending}
+                  onClick={() => collectMutation.mutate(pickupTokenInput)}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  {collectMutation.isPending ? <Spinner size="sm" /> : 'Confirm Handover'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 };
 
