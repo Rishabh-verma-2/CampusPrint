@@ -25,7 +25,7 @@ export interface CashfreeCustomerDetails {
 export interface CashfreeOrderMeta {
   return_url: string;
   notify_url: string;
-  payment_methods: string;
+  payment_methods?: string;
 }
 
 export interface CreateCashfreeOrderParams {
@@ -141,12 +141,20 @@ export class CashfreeService {
   static async createOrder(params: CreateCashfreeOrderParams): Promise<CashfreeOrderResponse> {
     console.log(`[Cashfree] Creating order: ${params.orderId} | Amount: ₹${params.orderAmount}`);
 
+    const orderMeta: Record<string, unknown> = {
+      return_url: params.orderMeta.return_url,
+      notify_url: params.orderMeta.notify_url,
+    };
+    if (params.orderMeta.payment_methods) {
+      orderMeta.payment_methods = params.orderMeta.payment_methods;
+    }
+
     const body: Record<string, unknown> = {
       order_id: params.orderId,
       order_amount: params.orderAmount,
       order_currency: params.currency,
       customer_details: params.customer,
-      order_meta: params.orderMeta,
+      order_meta: orderMeta,
     };
 
     if (params.orderNote) {

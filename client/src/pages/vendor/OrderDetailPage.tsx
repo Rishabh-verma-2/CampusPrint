@@ -14,7 +14,8 @@ import {
   ExternalLink,
   Layers,
   Sparkles,
-  QrCode,
+  Keyboard,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import { printJobApi } from '../../api/printJobApi';
@@ -41,22 +42,50 @@ const VendorOrderDetailPage: React.FC = () => {
   const documentUrl: string | undefined = data?.documentUrl;
 
   const actionMutation = useMutation({
-    mutationFn: (action: string) => {
-      const actions: Record<string, () => Promise<unknown>> = {
+    mutationFn: ({ action, printWindow }: { action: string; printWindow?: Window | null }) => {
+      const actions: Record<string, () => Promise<any>> = {
         accept: () => printJobApi.accept(id!),
         start: () => printJobApi.start(id!),
         ready: () => printJobApi.markReady(id!),
       };
       return actions[action]();
     },
-    onSuccess: () => {
+    onSuccess: (response: any, variables) => {
       qc.invalidateQueries({ queryKey: ['vendorJob', id] });
       qc.invalidateQueries({ queryKey: ['vendorQueue'] });
       qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
-      toast.success('Order status updated');
+
+      if (variables.action === 'start') {
+        const docUrl = response?.data?.data?.documentUrl || targetFileUrl;
+        const printWin = variables.printWindow;
+        if (docUrl) {
+          if (printWin && !printWin.closed) {
+            printWin.location.href = docUrl;
+          } else {
+            window.open(docUrl, '_blank', 'noopener,noreferrer');
+          }
+          toast.success('Printing started! Document opened in new tab.');
+        } else {
+          if (printWin && !printWin.closed) printWin.close();
+          toast.success('Printing started');
+        }
+      } else {
+        toast.success('Order status updated');
+      }
     },
-    onError: () => toast.error('Action failed'),
+    onError: (_err, variables) => {
+      if (variables.printWindow && !variables.printWindow.closed) {
+        variables.printWindow.close();
+      }
+      toast.error('Action failed');
+    },
   });
+
+  const handleStartPrinting = () => {
+    // Open a blank tab synchronously within user gesture to prevent popup blockers
+    const printWindow = window.open('about:blank', '_blank');
+    actionMutation.mutate({ action: 'start', printWindow });
+  };
 
   const collectMutation = useMutation({
     mutationFn: (token: string) => printJobApi.collect(id!, token),
@@ -67,7 +96,8 @@ const VendorOrderDetailPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['vendorQueue'] });
       qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
     },
-    onError: () => toast.error('Invalid token or pickup confirmation failed'),
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Invalid token or pickup confirmation failed'),
   });
 
   if (isLoading) {
@@ -88,7 +118,7 @@ const VendorOrderDetailPage: React.FC = () => {
   }
 
   const doc =
-    typeof job.documentId === 'object'
+    job.documentId && typeof job.documentId === 'object'
       ? (job.documentId as { originalName: string; pageCount: number; fileSize?: number; fileUrl?: string })
       : null;
   const studentObj =
@@ -100,8 +130,11 @@ const VendorOrderDetailPage: React.FC = () => {
   const customerPhone = job.customerPhone || studentObj?.phone;
   const customerIdentifier =
     job.customerIdentifier || studentObj?.enrollmentNumber || customerPhone || '';
+  const isCompleted = job.status === 'COLLECTED';
   const targetFileUrl =
-    documentUrl || doc?.fileUrl || (job?._id ? `/api/print-jobs/${job._id}/file` : undefined);
+    !isCompleted
+      ? (documentUrl || doc?.fileUrl || (job?._id ? `/api/print-jobs/${job._id}/file` : undefined))
+      : undefined;
 
   return (
     <ErrorBoundary fallbackTitle="Could not display order details">
@@ -210,7 +243,12 @@ const VendorOrderDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {targetFileUrl && (
+          {isCompleted ? (
+            <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-100 text-slate-500 text-xs font-semibold border border-slate-200 flex-shrink-0">
+              <CheckCircle2 size={15} className="text-emerald-600" />
+              <span>PDF deleted after pickup</span>
+            </div>
+          ) : targetFileUrl ? (
             <a
               href={targetFileUrl}
               target="_blank"
@@ -221,8 +259,15 @@ const VendorOrderDetailPage: React.FC = () => {
               <span>Open / Download PDF</span>
               <ExternalLink size={13} />
             </a>
-          )}
+          ) : null}
         </div>
+
+        {isCompleted && (
+          <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
+            <ShieldCheck size={16} className="text-emerald-600 flex-shrink-0" />
+            <span>Document file was permanently deleted from cloud storage upon verified handover for privacy.</span>
+          </div>
+        )}
       </div>
 
       {/* ─── Print Specifications & Pricing ──────────────────────────────────── */}
@@ -286,7 +331,7 @@ const VendorOrderDetailPage: React.FC = () => {
             <button
               type="button"
               disabled={actionMutation.isPending}
-              onClick={() => actionMutation.mutate('accept')}
+              onClick={() => actionMutation.mutate({ action: 'accept' })}
               className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-colors"
             >
               Accept Print Job
@@ -297,7 +342,7 @@ const VendorOrderDetailPage: React.FC = () => {
             <button
               type="button"
               disabled={actionMutation.isPending}
-              onClick={() => actionMutation.mutate('start')}
+              onClick={() => handleStartPrinting()}
               className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
               <Printer size={15} />
@@ -309,7 +354,7 @@ const VendorOrderDetailPage: React.FC = () => {
             <button
               type="button"
               disabled={actionMutation.isPending}
-              onClick={() => actionMutation.mutate('ready')}
+              onClick={() => actionMutation.mutate({ action: 'ready' })}
               className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
               <CheckCircle2 size={15} />
@@ -323,7 +368,7 @@ const VendorOrderDetailPage: React.FC = () => {
               onClick={() => setShowHandoverModal(true)}
               className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2"
             >
-              <QrCode size={15} />
+              <CheckCircle2 size={15} />
               <span>Verify & Complete Handover</span>
             </button>
           )}
@@ -356,7 +401,7 @@ const VendorOrderDetailPage: React.FC = () => {
 
             <h3 className="text-base font-bold text-slate-900">Confirm Order Handover</h3>
             <p className="text-xs text-slate-500 mt-1">
-              Ask student for their pickup code (expected: <strong className="font-mono text-blue-600">{job.publicToken}</strong>).
+              Ask student for their token number (e.g. <strong className="font-mono text-blue-600">{job.publicToken}</strong>).
             </p>
 
             <div className="mt-4 space-y-4">

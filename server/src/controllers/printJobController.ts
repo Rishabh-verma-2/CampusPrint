@@ -14,6 +14,7 @@ import { PrintJobStateMachine } from '../services/PrintJobStateMachine';
 import { TokenService } from '../services/TokenService';
 import { NotificationService } from '../services/NotificationService';
 import { getIO } from '../sockets/socketManager';
+import { PrintJobStatus } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 // ─── Create Print Job (QUEUED) ────────────────────────────────────────────────
@@ -77,7 +78,7 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
   const platformFee = feeDoc?.value !== undefined ? Number(feeDoc.value) : 2;
 
   const pricing = PricingService.calculate(configWithPages, priceSnapshot, totalPages, platformFee);
-  const publicToken = await TokenService.generateUniqueToken();
+  const publicToken = await TokenService.generateUniqueToken(vendor._id.toString());
 
   const student = await User.findById(req.user!._id);
   const studentProfile = await StudentProfile.findOne({ userId: req.user!._id });
@@ -182,13 +183,15 @@ export const getPrintJob = asyncHandler(async (req: AuthRequest, res: Response) 
     }
   }
 
-  // Get signed URL for vendor
+  // Get signed URL for vendor (never provided for COLLECTED jobs)
   let documentUrl: string | undefined;
-  if (role === 'VENDOR' || role === 'ADMIN' || role === 'SUPER_ADMIN') {
+  if ((role === 'VENDOR' || role === 'ADMIN' || role === 'SUPER_ADMIN') && job.status !== 'COLLECTED') {
     const docId = (job.documentId as any)?._id || job.documentId;
-    const doc = await DocumentModel.findById(docId);
-    if (doc) {
-      documentUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
+    if (docId) {
+      const doc = await DocumentModel.findById(docId);
+      if (doc) {
+        documentUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
+      }
     }
   }
 
@@ -198,6 +201,11 @@ export const getPrintJob = asyncHandler(async (req: AuthRequest, res: Response) 
 export const downloadPrintJobFile = asyncHandler(async (req: AuthRequest, res: Response) => {
   const job = await PrintJob.findById(req.params.id);
   if (!job) throw createError('Print job not found', 404, 'JOB_NOT_FOUND');
+
+  // Once a job is completed / COLLECTED, documents are permanently deleted for privacy
+  if (job.status === 'COLLECTED') {
+    throw createError('Document has been permanently deleted after pickup completion', 410, 'DOCUMENT_DELETED');
+  }
 
   const role = req.user!.role;
   const userId = req.user!._id;
@@ -214,7 +222,7 @@ export const downloadPrintJobFile = asyncHandler(async (req: AuthRequest, res: R
 
   const docId = (job.documentId as any)?._id || job.documentId;
   const doc = await DocumentModel.findById(docId);
-  if (!doc) throw createError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
+  if (!doc) throw createError('Document not found or already deleted', 404, 'DOCUMENT_NOT_FOUND');
 
   const fileUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
   res.redirect(fileUrl);
@@ -242,9 +250,12 @@ export const acceptPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
   job.acceptedAt = new Date();
   await job.save();
 
-  emitJobUpdate(job.vendorId.toString(), job.studentId.toString(), job);
+  const vId = getCleanId(job.vendorId);
+  const sId = getCleanId(job.studentId);
+  emitJobUpdate(vId, sId, job);
+  emitQueueUpdated(vId);
   await NotificationService.create(
-    job.studentId.toString(),
+    sId,
     'JOB_ACCEPTED',
     'Print Job Accepted',
     `Your print job ${job.publicToken} has been accepted by the vendor.`,
@@ -271,11 +282,34 @@ export const startPrinting = asyncHandler(async (req: AuthRequest, res: Response
 
   PrintJobStateMachine.assertTransition(job.status, 'PRINTING');
   job.status = 'PRINTING';
+  job.acceptedAt = job.acceptedAt || new Date();
   job.printingStartedAt = new Date();
   await job.save();
 
-  emitJobUpdate(job.vendorId.toString(), job.studentId.toString(), job);
-  res.json({ success: true, data: { job } });
+  const vId = getCleanId(job.vendorId);
+  const sId = getCleanId(job.studentId);
+  emitJobUpdate(vId, sId, job);
+  emitQueueUpdated(vId);
+
+  // Generate signed document URL for immediate opening/printing
+  let documentUrl: string | undefined;
+  const docId = (job.documentId as any)?._id || job.documentId;
+  if (docId) {
+    const doc = await DocumentModel.findById(docId);
+    if (doc) {
+      documentUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
+    }
+  }
+
+  await NotificationService.create(
+    sId,
+    'JOB_PRINTING',
+    'Printing Started',
+    `Your print job ${job.publicToken} is now printing!`,
+    { jobId: job._id }
+  );
+
+  res.json({ success: true, data: { job, documentUrl } });
 });
 
 // ─── Vendor: Mark Ready ───────────────────────────────────────────────────────
@@ -293,9 +327,12 @@ export const markReady = asyncHandler(async (req: AuthRequest, res: Response) =>
   job.readyAt = new Date();
   await job.save();
 
-  emitJobUpdate(job.vendorId.toString(), job.studentId.toString(), job);
+  const vId = getCleanId(job.vendorId);
+  const sId = getCleanId(job.studentId);
+  emitJobUpdate(vId, sId, job);
+  emitQueueUpdated(vId);
   await NotificationService.create(
-    job.studentId.toString(),
+    sId,
     'JOB_READY',
     'Your print is ready',
     `Your print job ${job.publicToken} is ready for pickup at the vendor.`,
@@ -345,13 +382,31 @@ export const collectPrintJob = asyncHandler(async (req: AuthRequest, res: Respon
 
   if (!job) throw createError('Job not found', 404, 'JOB_NOT_FOUND');
   if (job.vendorId.toString() !== vendor._id.toString()) throw createError('Forbidden', 403, 'FORBIDDEN');
-  if (job.status !== 'READY') throw createError('Job is not ready for pickup', 400, 'NOT_READY');
 
-  // Verify token (handles with or without CP- prefix)
-  const normalizedInput = token?.trim().toUpperCase();
-  const validTokens = [normalizedInput, `CP-${normalizedInput}`];
-  if (token && !validTokens.includes(job.publicToken)) {
-    throw createError('Invalid token', 400, 'INVALID_TOKEN');
+  // Idempotent: If already COLLECTED (double-click or network retry), return success
+  if (job.status === 'COLLECTED') {
+    return res.json({ success: true, data: { job } });
+  }
+
+  if (job.status !== 'READY') {
+    throw createError(
+      `Job ${job.publicToken} is currently in '${job.status}' status. Only orders marked 'READY' can be collected.`,
+      400,
+      'NOT_READY'
+    );
+  }
+
+  // Verify token — accept various input formats: '3', '03', 'CP-03', 'cp-3'
+  if (token) {
+    const cleanToken = token.trim().toUpperCase();
+    const tokenCandidates = TokenService.normalizeInputToken(cleanToken);
+    const tokenMatches =
+      tokenCandidates.includes(job.publicToken.toUpperCase()) ||
+      cleanToken === job.publicToken.toUpperCase() ||
+      cleanToken === job.publicToken.replace('CP-', '').toUpperCase();
+    if (!tokenMatches) {
+      throw createError(`Invalid token. Expected ${job.publicToken}, got "${token}"`, 400, 'INVALID_TOKEN');
+    }
   }
 
   PrintJobStateMachine.assertTransition(job.status, 'COLLECTED');
@@ -359,9 +414,53 @@ export const collectPrintJob = asyncHandler(async (req: AuthRequest, res: Respon
   job.collectedAt = new Date();
   await job.save();
 
-  emitJobUpdate(job.vendorId.toString(), job.studentId.toString(), job);
+  // ─── Clean up document from Database & Cloudinary ─────────────────────────
+  // Permanently delete PDF files from Cloudinary and remove Document records from DB
+  const docIdsToClean: string[] = [];
+  if (job.documentId) {
+    const dId = (job.documentId as any)?._id || job.documentId;
+    docIdsToClean.push(dId.toString());
+  }
+  if (Array.isArray(job.documentIds) && job.documentIds.length > 0) {
+    for (const d of job.documentIds) {
+      const dId = (d as any)?._id || d;
+      if (dId && !docIdsToClean.includes(dId.toString())) {
+        docIdsToClean.push(dId.toString());
+      }
+    }
+  }
+
+  for (const docId of docIdsToClean) {
+    try {
+      const doc = await DocumentModel.findById(docId);
+      if (doc) {
+        // Check if any other non-collected job is still using this document
+        const otherActiveJob = await PrintJob.findOne({
+          _id: { $ne: job._id },
+          status: { $nin: ['COLLECTED', 'CANCELLED', 'FAILED'] },
+          $or: [{ documentId: doc._id }, { documentIds: doc._id }],
+        });
+
+        if (!otherActiveJob) {
+          console.log(`[Collect] Permanently deleting PDF from ${doc.storageProvider}: ${doc.storageKey}`);
+          await StorageService.delete(doc.storageKey, doc.storageProvider);
+          await DocumentModel.findByIdAndDelete(doc._id);
+          console.log(`[Collect] Document record ${doc._id} permanently deleted from DB`);
+        } else {
+          console.log(`[Collect] Document ${doc._id} is still in use by job ${otherActiveJob.publicToken}`);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Collect] Non-fatal error deleting document ${docId}:`, err?.message);
+    }
+  }
+
+  const vId = getCleanId(job.vendorId);
+  const sId = getCleanId(job.studentId);
+  emitJobUpdate(vId, sId, job);
+  emitQueueUpdated(vId); // queue positions shift
   await NotificationService.create(
-    job.studentId.toString(),
+    sId,
     'JOB_COLLECTED',
     'Pickup Confirmed',
     `Your print job ${job.publicToken} has been collected. Thank you for using CampusPrint!`,
@@ -379,18 +478,32 @@ export const verifyPickupToken = asyncHandler(async (req: AuthRequest, res: Resp
   if (!vendor) throw createError('Vendor not found', 404, 'VENDOR_NOT_FOUND');
 
   const rawToken = token?.trim().toUpperCase();
-  const tokenQuery = rawToken?.startsWith('CP-') ? rawToken : `CP-${rawToken}`;
+  const tokenCandidates = TokenService.normalizeInputToken(rawToken || '');
 
+  // Scope search to THIS vendor's jobs and match against normalized candidates
   const job = await PrintJob.findOne({
-    $or: [{ publicToken: rawToken }, { publicToken: tokenQuery }],
+    vendorId: vendor._id,
+    publicToken: { $in: [...tokenCandidates, rawToken] },
   })
     .populate('studentId', 'name email phone enrollmentNumber')
     .populate('documentId', 'originalName pageCount')
     .populate('documentIds', 'originalName pageCount');
 
-  if (!job) throw createError('Invalid token', 404, 'INVALID_TOKEN');
-  if (job.vendorId.toString() !== vendor._id.toString()) throw createError('Forbidden', 403, 'FORBIDDEN');
-  if (job.status !== 'READY') throw createError('Job is not ready for pickup', 400, 'NOT_READY');
+  if (!job) {
+    throw createError(`Token "${token}" not found for your store`, 404, 'INVALID_TOKEN');
+  }
+
+  if (job.status === 'COLLECTED') {
+    throw createError(`Order ${job.publicToken} has already been collected and completed`, 400, 'ALREADY_COLLECTED');
+  }
+
+  if (job.status !== 'READY') {
+    throw createError(
+      `Order ${job.publicToken} is currently '${job.status}'. Please print and mark it READY before handover.`,
+      400,
+      'NOT_READY'
+    );
+  }
 
   res.json({ success: true, data: { job } });
 });
@@ -415,14 +528,148 @@ export const reportProblem = asyncHandler(async (req: AuthRequest, res: Response
   res.json({ success: true, data: { job } });
 });
 
+// ─── Get Queue Position for a print job ──────────────────────────────────────
+// GET /api/print-jobs/:id/queue-position
+// Returns the student's position in the vendor's active queue.
+// Only meaningful while job is in QUEUED, ACCEPTED, or PRINTING state.
+// Students poll this + listen to queue:updated socket events.
+
+const AVG_MINUTES_PER_JOB = 3; // Configurable default estimate
+
+export const getQueuePosition = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const job = await PrintJob.findById(req.params.id).lean();
+  if (!job) throw createError('Job not found', 404, 'JOB_NOT_FOUND');
+
+  // Authorization
+  if (req.user!.role === 'STUDENT' && job.studentId.toString() !== req.user!._id) {
+    throw createError('Forbidden', 403, 'FORBIDDEN');
+  }
+
+  // Only active queue positions make sense
+  const activeStatuses: PrintJobStatus[] = ['QUEUED', 'ACCEPTED', 'PRINTING'];
+  if (!activeStatuses.includes(job.status as PrintJobStatus)) {
+    return res.json({
+      success: true,
+      data: {
+        status: job.status,
+        position: null,
+        jobsAhead: 0,
+        estimatedMinutes: 0,
+        message:
+          job.status === 'READY' ? 'Your prints are ready for pickup!' :
+          job.status === 'COLLECTED' ? 'Collected — done!' :
+          job.status === 'PAYMENT_PENDING' ? 'Awaiting payment confirmation' :
+          'Order is not currently in queue',
+      },
+    });
+  }
+
+  // Count jobs for same vendor in active statuses that were created BEFORE this job
+  const jobsAhead = await PrintJob.countDocuments({
+    vendorId: job.vendorId,
+    status: { $in: activeStatuses },
+    createdAt: { $lt: job.createdAt },
+  });
+
+  // Position is 1-indexed (1 = next to be served)
+  const position = jobsAhead + 1;
+  const estimatedMinutes = jobsAhead * AVG_MINUTES_PER_JOB;
+
+  res.json({
+    success: true,
+    data: {
+      status: job.status,
+      position,
+      jobsAhead,
+      estimatedMinutes,
+      message:
+        position === 1
+          ? 'You are next in queue!'
+          : `${jobsAhead} job${jobsAhead === 1 ? '' : 's'} ahead of you`,
+    },
+  });
+});
+// GET /api/print-jobs/:id/payment-status
+// Returns the authoritative payment + order status for a given print job.
+// Used by the frontend to check if payment was confirmed without relying on
+// Cashfree return URL query parameters.
+
+export const getJobPaymentStatus = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const job = await PrintJob.findById(req.params.id)
+    .populate('vendorId', 'shopName address')
+    .lean();
+
+  if (!job) throw createError('Job not found', 404, 'JOB_NOT_FOUND');
+
+  // Authorization: student sees own jobs, vendor sees jobs for their store
+  const role = req.user!.role;
+  const userId = req.user!._id;
+
+  if (role === 'STUDENT' && job.studentId.toString() !== userId) {
+    throw createError('Forbidden', 403, 'FORBIDDEN');
+  }
+  if (role === 'VENDOR') {
+    const vendor = await Vendor.findOne({ userId });
+    if (!vendor || job.vendorId.toString() !== vendor._id.toString()) {
+      throw createError('Forbidden', 403, 'FORBIDDEN');
+    }
+  }
+
+  // Find associated payment record
+  const paymentRecord = await Payment.findOne({ printJobId: job._id })
+    .select('status amount paidAt gatewayOrderId')
+    .lean();
+
+  res.json({
+    success: true,
+    data: {
+      orderId: job.publicToken,
+      printJobId: job._id,
+      orderStatus: job.status,
+      paymentStatus: paymentRecord?.status ?? null,
+      amount: paymentRecord?.amount ?? job.pricing?.total,
+      paidAt: paymentRecord?.paidAt ?? null,
+      vendor: (job.vendorId as any)?.shopName
+        ? { shopName: (job.vendorId as any).shopName, address: (job.vendorId as any).address }
+        : null,
+    },
+  });
+});
+
 // ─── Helper: Emit Socket events ───────────────────────────────────────────────
 
-function emitJobUpdate(vendorId: string, studentId: string, job: unknown) {
+function getCleanId(val: any): string {
+  if (!val) return '';
+  if (typeof val === 'object') {
+    return (val._id || val.id || val).toString();
+  }
+  const str = String(val);
+  const match = str.match(/[0-9a-fA-F]{24}/);
+  return match ? match[0] : str;
+}
+
+function emitJobUpdate(vendorId: any, studentId: any, job: unknown) {
   try {
+    const vId = getCleanId(vendorId);
+    const sId = getCleanId(studentId);
     const io = getIO();
-    io.to(`vendor:${vendorId}`).emit('printJob:updated', { job });
-    io.to(`student:${studentId}`).emit('printJob:updated', { job });
+    if (vId) io.to(`vendor:${vId}`).emit('printJob:updated', { job });
+    if (sId) io.to(`student:${sId}`).emit('printJob:updated', { job });
   } catch (e) {
     // Socket not initialized
   }
 }
+
+// Emits queue:updated to the vendor room so all students with jobs at this vendor
+// can re-fetch their queue positions. Called whenever any job at this vendor changes status.
+function emitQueueUpdated(vendorId: any) {
+  try {
+    const vId = getCleanId(vendorId);
+    const io = getIO();
+    // Emit to the vendor room — students listen for this event on the vendor they ordered from
+    if (vId) io.to(`vendor:${vId}`).emit('queue:updated', { vendorId: vId });
+  } catch {
+    // Socket not initialized — non-fatal
+  }
+}
+

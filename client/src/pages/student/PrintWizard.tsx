@@ -74,6 +74,7 @@ const PrintWizardPage: React.FC = () => {
 
   // Step 4 & 5: Submission & Payment
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false); // synchronous guard against double-clicks across async boundaries
   const [createdJob, setCreatedJob] = useState<PrintJob | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
   const [paymentState, setPaymentState] = useState<PaymentState>('idle');
@@ -243,6 +244,10 @@ const PrintWizardPage: React.FC = () => {
       return;
     }
 
+    // Synchronous guard — prevents double-click even across async render boundaries
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+
     setPaymentState('creating_job');
     setIsSubmitting(true);
     setPaymentError(null);
@@ -286,19 +291,28 @@ const PrintWizardPage: React.FC = () => {
       setPaymentState('checkout');
 
       // Load Cashfree JS SDK dynamically (sandbox or production)
-      const cashfreeMode = 'sandbox'; // Always sandbox for now — change when going live
+      // Mode is driven by VITE_CASHFREE_ENV environment variable.
+      // Default: 'sandbox' (development). Set to 'production' in prod .env.
+      const cashfreeMode = (import.meta.env.VITE_CASHFREE_ENV ?? 'sandbox').toLowerCase();
       await loadCashfreeSDK();
 
       const cashfree = (window as any).Cashfree({ mode: cashfreeMode });
 
-      // Launch Cashfree Hosted Checkout (UPI only — enforced on backend via order_meta)
+      // Launch Cashfree Hosted Checkout
       cashfree.checkout({
         paymentSessionId,
         redirectTarget: '_self', // Redirect in same tab to /payment/return
+      }).then((result: any) => {
+        if (result?.error) {
+          console.error('[Cashfree error]', result.error);
+          const msg = result.error.message || 'Payment setup failed. Please try again.';
+          setPaymentError(msg);
+          setPaymentState('failed');
+          toast.error(msg);
+          setIsSubmitting(false);
+          isSubmittingRef.current = false;
+        }
       });
-
-      // After checkout(), the page will redirect to return_url set in the backend.
-      // We don't need to handle the result here — PaymentReturnPage does that.
 
     } catch (err: any) {
       console.error('[Payment] Error:', err);
@@ -307,6 +321,7 @@ const PrintWizardPage: React.FC = () => {
       setPaymentState('failed');
       toast.error(errMsg);
       setIsSubmitting(false);
+      isSubmittingRef.current = false; // release guard on failure so student can retry
     }
   };
 
@@ -1149,6 +1164,23 @@ const PrintWizardPage: React.FC = () => {
                   >
                     Try Again
                   </button>
+                  {createdJob && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await paymentApi.simulateSuccess(createdJob._id);
+                          toast.success('Payment simulated successfully! Moving to order details...');
+                          navigate(`/student/orders/${createdJob._id}`);
+                        } catch (e: any) {
+                          toast.error(e.response?.data?.message || 'Simulation failed');
+                        }
+                      }}
+                      className="px-5 py-2.5 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 text-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      ⚡ Simulate Success (Dev)
+                    </button>
+                  )}
                 </div>
               </>
             ) : null}

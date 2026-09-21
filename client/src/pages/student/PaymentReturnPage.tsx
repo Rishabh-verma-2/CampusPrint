@@ -116,7 +116,7 @@ const PaymentReturnPage: React.FC = () => {
             <div style={styles.tokenBox}>
               <span style={styles.tokenLabel}>Your Pickup Token</span>
               <span style={styles.token}>{result.printJob.publicToken}</span>
-              <span style={styles.tokenHint}>Show this token at the store to collect your prints</span>
+              <span style={styles.tokenHint}>Tell this token number to the vendor to collect your prints</span>
             </div>
           )}
 

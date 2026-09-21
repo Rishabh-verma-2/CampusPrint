@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Building,
   ShieldCheck,
-  QrCode,
   Calendar,
 } from 'lucide-react';
 import { vendorApi } from '../../api/vendorApi';

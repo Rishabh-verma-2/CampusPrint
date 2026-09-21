@@ -65,12 +65,13 @@ export const getVendorDashboard = asyncHandler(async (req: AuthRequest, res: Res
     PrintJob.countDocuments({ vendorId: vendor._id, status: 'COLLECTED', createdAt: { $gte: today } }),
   ]);
 
-  // Today's revenue
+  // Today's confirmed revenue — counts from QUEUED onwards since payment is captured at order time
+  // (Cashfree charges the student immediately; vendor's earnings are confirmed when job is QUEUED)
   const revenueAgg = await PrintJob.aggregate([
     {
       $match: {
         vendorId: vendor._id,
-        status: { $in: ['COLLECTED', 'READY'] },
+        status: { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY', 'COLLECTED'] },
         createdAt: { $gte: today },
       },
     },
@@ -131,14 +132,26 @@ export const getVendorQueue = asyncHandler(async (req: AuthRequest, res: Respons
   const { status, page = 1, limit = 20, sort = 'oldest' } = req.query;
 
   const filter: Record<string, unknown> = { vendorId: vendor._id };
+  let sortDir: 1 | -1 = sort === 'newest' ? -1 : 1;
+
   if (status && status !== 'all') {
-    if (status === 'new') filter.status = 'QUEUED';
-    else filter.status = (status as string).toUpperCase();
+    const s = (status as string).toLowerCase();
+    if (s === 'new') {
+      filter.status = 'QUEUED';
+    } else if (s === 'printing') {
+      filter.status = { $in: ['ACCEPTED', 'PRINTING'] };
+    } else if (s === 'ready') {
+      filter.status = 'READY';
+    } else if (s === 'completed' || s === 'collected') {
+      filter.status = 'COLLECTED';
+      // For completed jobs, show most recent completions first by default
+      if (sort === 'oldest') sortDir = -1;
+    } else {
+      filter.status = (status as string).toUpperCase();
+    }
   } else {
     filter.status = { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY'] };
   }
-
-  const sortDir = sort === 'newest' ? -1 : 1;
 
   const jobs = await PrintJob.find(filter)
     .populate('studentId', 'name phone enrollmentNumber')
@@ -214,7 +227,7 @@ export const getVendorAnalytics = asyncHandler(async (req: AuthRequest, res: Res
       {
         $match: {
           vendorId: vendor._id,
-          status: { $in: ['COLLECTED', 'READY'] },
+          status: { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY', 'COLLECTED'] },
           createdAt: { $gte: from },
         },
       },

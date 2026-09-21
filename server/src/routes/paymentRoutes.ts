@@ -7,6 +7,7 @@ import {
   getPayment,
   getPaymentByJob,
   getPaymentStatus,
+  simulatePaymentSuccess,
 } from '../controllers/paymentController';
 
 const router = Router();
@@ -40,14 +41,17 @@ router.post('/webhook', rawBodyCapture, handlePaymentWebhook);
 // Create Cashfree payment order for a PrintJob
 router.post('/create-order', authenticate, requireStudent, createPaymentOrder);
 
+// Simulate payment success (dev/sandbox testing)
+router.post('/simulate-success', authenticate, requireStudent, simulatePaymentSuccess);
+
 // Verify payment status — called by frontend return page
 // Fetches actual status from Cashfree API (don't trust query params from Cashfree return URL)
 router.get('/status/:orderId', authenticate, getPaymentStatus);
 
-// Get payment by job (for student order detail)
+// Get payment by PrintJob ID
 router.get('/by-job/:jobId', authenticate, getPaymentByJob);
 
-// Get payment by internal ID
+// Get payment by ID
 router.get('/:id', authenticate, getPayment);
 
 export default router;

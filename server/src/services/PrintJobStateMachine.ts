@@ -7,7 +7,7 @@ import { PrintJobStatus } from '../types';
 const VALID_TRANSITIONS: Record<PrintJobStatus, PrintJobStatus[]> = {
   PAYMENT_PENDING: ['PAID', 'CANCELLED'],
   PAID: ['QUEUED'],
-  QUEUED: ['ACCEPTED', 'CANCELLED'],
+  QUEUED: ['ACCEPTED', 'PRINTING', 'CANCELLED'],
   ACCEPTED: ['PRINTING', 'CANCELLED'],
   PRINTING: ['READY', 'FAILED'],
   READY: ['COLLECTED'],

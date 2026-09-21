@@ -14,9 +14,22 @@ export const printJobApi = {
   cancel: (id: string, reason?: string) =>
     apiClient.post(`/print-jobs/${id}/cancel`, { reason }),
 
+  // Queue position — used by students to track their place in the vendor's active queue
+  getQueuePosition: (id: string) =>
+    apiClient.get<{
+      data: {
+        status: string;
+        position: number | null;
+        jobsAhead: number;
+        estimatedMinutes: number;
+        message: string;
+      };
+    }>(`/print-jobs/${id}/queue-position`),
+
   // Vendor actions
   accept: (id: string) => apiClient.post(`/print-jobs/${id}/accept`),
-  start: (id: string) => apiClient.post(`/print-jobs/${id}/start`),
+  start: (id: string) =>
+    apiClient.post<{ data: { job: PrintJob; documentUrl?: string } }>(`/print-jobs/${id}/start`),
   markReady: (id: string) => apiClient.post(`/print-jobs/${id}/ready`),
   collect: (id: string, token?: string) =>
     apiClient.post(`/print-jobs/${id}/collect`, { token }),

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart,
@@ -30,12 +30,32 @@ import {
 } from 'lucide-react';
 import { vendorApi } from '../../api/vendorApi';
 import { Spinner, EmptyState } from '../../components/ui';
+import { useSocket } from '../../context/SocketContext';
+import { useQueryClient } from '@tanstack/react-query';
 
 const PIE_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b'];
 
 const AnalyticsPage: React.FC = () => {
   const [period, setPeriod] = useState<'7d' | '30d'>('7d');
   const [ledgerTab, setLedgerTab] = useState<'orders' | 'daily'>('orders');
+  const { socket } = useSocket();
+  const qc = useQueryClient();
+
+  // Real-time earnings: invalidate when new orders arrive (payment already captured at QUEUED time)
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => {
+      qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
+      qc.invalidateQueries({ queryKey: ['vendorAnalytics'] });
+      qc.invalidateQueries({ queryKey: ['vendorQueue', 'completed'] });
+    };
+    socket.on('printJob:new', refresh);
+    socket.on('printJob:updated', refresh);
+    return () => {
+      socket.off('printJob:new', refresh);
+      socket.off('printJob:updated', refresh);
+    };
+  }, [socket, qc]);
 
   const { data: dashData, isLoading: dashLoading } = useQuery({
     queryKey: ['vendorDashboard'],

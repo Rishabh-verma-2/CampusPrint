@@ -104,20 +104,26 @@ export class StorageService {
   }
 
   static async delete(storageKey: string, provider: 'local' | 'cloudinary'): Promise<void> {
-    if (provider === 'local') {
-      const filePath = path.resolve(process.cwd(), storageKey);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    try {
+      if (provider === 'local') {
+        const filePath = path.resolve(process.cwd(), storageKey);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+        return;
       }
-      return;
-    }
 
-    const cloudinary = await import('cloudinary');
-    cloudinary.v2.config({
-      cloud_name: env.CLOUDINARY_CLOUD_NAME,
-      api_key: env.CLOUDINARY_API_KEY,
-      api_secret: env.CLOUDINARY_API_SECRET,
-    });
-    await cloudinary.v2.uploader.destroy(storageKey, { resource_type: 'raw' });
+      if (provider === 'cloudinary') {
+        const cloudinary = await import('cloudinary');
+        cloudinary.v2.config({
+          cloud_name: env.CLOUDINARY_CLOUD_NAME,
+          api_key: env.CLOUDINARY_API_KEY,
+          api_secret: env.CLOUDINARY_API_SECRET,
+        });
+        await cloudinary.v2.uploader.destroy(storageKey, { resource_type: 'raw' });
+      }
+    } catch (err: any) {
+      console.warn(`[StorageService] Delete failed for ${storageKey} (${provider}):`, err?.message);
+    }
   }
 }

@@ -32,9 +32,15 @@ export const paymentApi = {
    * Returns payment_session_id (frontend passes this to Cashfree JS SDK).
    * Amount is recalculated on the backend — not trusted from frontend.
    */
-  createOrder: (printJobId: string) =>
+  createOrder: (printJobId: string, forceNew = false) =>
     apiClient.post<{ success: boolean; data: CreateOrderResponse }>(
       '/payments/create-order',
+      { printJobId, forceNew }
+    ),
+
+  simulateSuccess: (printJobId: string) =>
+    apiClient.post<{ success: boolean; data: { message: string; jobStatus: string; orderId: string } }>(
+      '/payments/simulate-success',
       { printJobId }
     ),
 

@@ -12,7 +12,7 @@ import {
   Printer,
   Clock,
   Sparkles,
-  QrCode,
+  Keyboard,
   X,
   Phone,
   AlertCircle,
@@ -52,39 +52,77 @@ const VendorQueuePage: React.FC = () => {
 
   const jobs: PrintJob[] = data?.jobs ?? [];
 
-  // Real-time updates
+  // Real-time updates + reconnect sync
   React.useEffect(() => {
     if (!socket) return;
     const refresh = () => qc.invalidateQueries({ queryKey: ['vendorQueue'] });
+
+    // On reconnect, immediately re-fetch to catch any orders missed while offline
+    const handleConnect = () => {
+      console.log('[VendorQueue] Socket connected/reconnected — syncing queue');
+      refresh();
+    };
+
+    socket.on('connect', handleConnect);
     socket.on('printJob:new', refresh);
     socket.on('printJob:updated', refresh);
     return () => {
+      socket.off('connect', handleConnect);
       socket.off('printJob:new', refresh);
       socket.off('printJob:updated', refresh);
     };
   }, [socket, qc]);
 
   const actionMutation = useMutation({
-    mutationFn: ({ action, id }: { action: string; id: string }) => {
-      const actions: Record<string, (id: string) => Promise<unknown>> = {
+    mutationFn: ({ action, id }: { action: string; id: string; printWindow?: Window | null }) => {
+      const actions: Record<string, (id: string) => Promise<any>> = {
         accept: printJobApi.accept,
         start: printJobApi.start,
         ready: printJobApi.markReady,
       };
       return actions[action](id);
     },
-    onSuccess: () => {
+    onSuccess: (response: any, variables) => {
       qc.invalidateQueries({ queryKey: ['vendorQueue'] });
       qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
-      toast.success('Order status updated');
+
+      if (variables.action === 'start') {
+        const docUrl = response?.data?.data?.documentUrl;
+        const printWin = variables.printWindow;
+        if (docUrl) {
+          if (printWin && !printWin.closed) {
+            printWin.location.href = docUrl;
+          } else {
+            window.open(docUrl, '_blank', 'noopener,noreferrer');
+          }
+          toast.success('Printing started! Document opened in new tab.');
+        } else {
+          if (printWin && !printWin.closed) printWin.close();
+          toast.success('Printing started');
+        }
+      } else {
+        toast.success('Order status updated');
+      }
     },
-    onError: () => toast.error('Action failed'),
+    onError: (_err, variables) => {
+      if (variables.printWindow && !variables.printWindow.closed) {
+        variables.printWindow.close();
+      }
+      toast.error('Action failed');
+    },
   });
+
+  const handleStartPrinting = (id: string) => {
+    // Open a blank tab synchronously within user gesture to prevent popup blockers
+    const printWindow = window.open('about:blank', '_blank');
+    actionMutation.mutate({ action: 'start', id, printWindow });
+  };
 
   const verifyMutation = useMutation({
     mutationFn: (token: string) => printJobApi.verifyToken(token).then((r) => r.data.data),
     onSuccess: (data) => setVerifyResult(data as { job: PrintJob }),
-    onError: () => toast.error('Invalid token or job is not ready for pickup'),
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Invalid token or job is not ready for pickup'),
   });
 
   const collectMutation = useMutation({
@@ -97,18 +135,23 @@ const VendorQueuePage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['vendorQueue'] });
       qc.invalidateQueries({ queryKey: ['vendorDashboard'] });
     },
-    onError: () => toast.error('Confirmation failed. Please verify token.'),
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Confirmation failed. Please verify token.'),
   });
 
-  // Filter jobs by search term
-  const filteredJobs = jobs.filter((job) => {
+  // De-duplicate by _id first, then filter by search term
+  const uniqueJobs = jobs.filter(
+    (job, idx, arr) => arr.findIndex((j) => j._id === job._id) === idx
+  );
+
+  const filteredJobs = uniqueJobs.filter((job) => {
     if (!searchTerm.trim()) return true;
     const s = searchTerm.toLowerCase();
     const token = job.publicToken?.toLowerCase() || '';
     const studentObj = typeof job.studentId === 'object' ? (job.studentId as any) : null;
     const name = (job.customerName || studentObj?.name || '').toLowerCase();
     const identifier = (job.customerIdentifier || studentObj?.enrollmentNumber || studentObj?.phone || '').toLowerCase();
-    const doc = typeof job.documentId === 'object' ? (job.documentId as any)?.originalName?.toLowerCase() : '';
+    const doc = job.documentId && typeof job.documentId === 'object' ? (job.documentId as any)?.originalName?.toLowerCase() : '';
     return token.includes(s) || name.includes(s) || identifier.includes(s) || doc?.includes(s);
   });
 
@@ -144,8 +187,8 @@ const VendorQueuePage: React.FC = () => {
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white text-xs sm:text-sm font-semibold hover:bg-blue-700 shadow-xs transition-colors"
             id="verify-pickup-btn"
           >
-            <QrCode size={16} />
-            <span>Verify Pickup Token</span>
+            <Keyboard size={16} />
+            <span>Verify Token</span>
           </button>
         </div>
       </div>
@@ -193,7 +236,7 @@ const VendorQueuePage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredJobs.map((job) => {
             const doc =
-              typeof job.documentId === 'object'
+              job.documentId && typeof job.documentId === 'object'
                 ? (job.documentId as { originalName: string; pageCount: number; fileSize?: number })
                 : null;
             const studentObj =
@@ -291,11 +334,12 @@ const VendorQueuePage: React.FC = () => {
                     <button
                       type="button"
                       disabled={actionMutation.isPending}
-                      onClick={() => actionMutation.mutate({ action: 'start', id: job._id })}
-                      className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-2xs"
+                      onClick={() => handleStartPrinting(job._id)}
+                      className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
                       id={`start-${job._id}`}
                     >
-                      Start Printing
+                      <Printer size={14} />
+                      <span>Start Printing</span>
                     </button>
                   )}
 
@@ -323,9 +367,16 @@ const VendorQueuePage: React.FC = () => {
                       className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors shadow-2xs flex items-center justify-center gap-1.5"
                       id={`collect-${job._id}`}
                     >
-                      <QrCode size={14} />
-                      <span>Verify Handover</span>
+                      <CheckCircle2 size={14} />
+                      <span>Verify & Hand Over</span>
                     </button>
+                  )}
+
+                  {job.status === 'COLLECTED' && (
+                    <div className="flex-1 py-1.5 px-3 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center gap-1.5">
+                      <CheckCircle2 size={14} className="text-emerald-600" />
+                      <span>Completed & Picked Up</span>
+                    </div>
                   )}
 
                   <button
@@ -369,11 +420,11 @@ const VendorQueuePage: React.FC = () => {
 
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <QrCode size={20} />
+                <Keyboard size={20} />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">Verify Pickup Token</h3>
-                <p className="text-xs text-slate-500">Ask the student for their 4-digit pickup code</p>
+                <p className="text-xs text-slate-500">Ask the student to say their token number, then type it below</p>
               </div>
             </div>
 
@@ -381,12 +432,15 @@ const VendorQueuePage: React.FC = () => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5">
-                    Student Pickup Token
+                    Student Token Number
                   </label>
+                  <div className="mb-2 text-xs text-slate-400">
+                    Student can say: <span className="font-mono font-bold text-slate-600">"CP-03"</span> or just <span className="font-mono font-bold text-slate-600">"3"</span> or <span className="font-mono font-bold text-slate-600">"03"</span>
+                  </div>
                   <input
                     type="text"
                     inputMode="numeric"
-                    placeholder="e.g. 1048"
+                    placeholder="e.g. 3 or 03 or CP-03"
                     value={pickupToken}
                     onChange={(e) => setPickupToken(e.target.value.trim())}
                     onKeyDown={(e) => e.key === 'Enter' && pickupToken && verifyMutation.mutate(pickupToken)}
@@ -482,7 +536,7 @@ const VendorQueuePage: React.FC = () => {
                     onClick={() =>
                       collectMutation.mutate({
                         id: verifyResult.job._id,
-                        token: pickupToken,
+                        token: verifyResult.job.publicToken,
                       })
                     }
                     className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
