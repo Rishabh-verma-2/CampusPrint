@@ -131,10 +131,19 @@ const VendorOrderDetailPage: React.FC = () => {
   const customerIdentifier =
     job.customerIdentifier || studentObj?.enrollmentNumber || customerPhone || '';
   const isCompleted = job.status === 'COLLECTED';
-  const targetFileUrl =
+  const rawTargetUrl =
     !isCompleted
       ? (documentUrl || doc?.fileUrl || (job?._id ? `/api/print-jobs/${job._id}/file` : undefined))
       : undefined;
+
+  const backendHost =
+    import.meta.env.VITE_BACKEND_URL ||
+    (import.meta.env.PROD ? 'https://campusprint-3agy.onrender.com' : '');
+
+  const targetFileUrl =
+    rawTargetUrl && !rawTargetUrl.startsWith('http') && !rawTargetUrl.startsWith('//')
+      ? `${backendHost}${rawTargetUrl}`
+      : rawTargetUrl;
 
   return (
     <ErrorBoundary fallbackTitle="Could not display order details">

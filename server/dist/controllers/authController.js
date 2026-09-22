@@ -21,17 +21,19 @@ const generateTokens = (userId, role, email) => {
     });
     return { accessToken, refreshToken };
 };
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: env_1.env.isProd(),
+    sameSite: env_1.env.isProd() ? 'none' : 'lax',
+});
 const setTokenCookies = (res, accessToken, refreshToken) => {
+    const options = getCookieOptions();
     res.cookie('accessToken', accessToken, {
-        httpOnly: true,
-        secure: env_1.env.isProd(),
-        sameSite: 'lax',
+        ...options,
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
     res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: env_1.env.isProd(),
-        sameSite: 'lax',
+        ...options,
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
 };
@@ -273,8 +275,9 @@ exports.logout = (0, errorHandler_1.asyncHandler)(async (req, res) => {
     if (req.user) {
         await User_1.User.findByIdAndUpdate(req.user._id, { refreshToken: null });
     }
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
+    const options = getCookieOptions();
+    res.clearCookie('accessToken', options);
+    res.clearCookie('refreshToken', options);
     res.json({ success: true, message: 'Logged out successfully' });
 });
 exports.getMe = (0, errorHandler_1.asyncHandler)(async (req, res) => {

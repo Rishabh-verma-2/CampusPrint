@@ -41,10 +41,35 @@ const socket_io_1 = require("socket.io");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const env_1 = require("../config/env");
 let io;
+const isAllowedOrigin = (origin) => {
+    if (!origin)
+        return true;
+    const configured = [
+        ...env_1.env.CLIENT_URL.split(','),
+        ...env_1.env.FRONTEND_URL.split(','),
+        ...env_1.env.SOCKET_CORS_ORIGIN.split(','),
+    ]
+        .map((s) => s.trim().replace(/\/$/, ''))
+        .filter(Boolean);
+    if (configured.includes('*') || configured.includes(origin))
+        return true;
+    if (/^https:\/\/.*\.vercel\.app$/.test(origin))
+        return true;
+    if (origin === 'http://localhost:5173' || origin === 'http://localhost:3000')
+        return true;
+    return false;
+};
 const initSocket = (server) => {
     io = new socket_io_1.Server(server, {
         cors: {
-            origin: env_1.env.SOCKET_CORS_ORIGIN.split(',').map((s) => s.trim()),
+            origin: (origin, callback) => {
+                if (isAllowedOrigin(origin)) {
+                    callback(null, true);
+                }
+                else {
+                    callback(new Error(`Origin ${origin} not allowed by CORS`));
+                }
+            },
             credentials: true,
         },
     });

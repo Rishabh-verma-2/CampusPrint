@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+const apiBaseURL =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://campusprint-3agy.onrender.com/api' : '/api');
+
 const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseURL,
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -22,7 +27,10 @@ apiClient.interceptors.response.use(
     ) {
       originalRequest._retry = true;
       try {
-        await axios.post('/api/auth/refresh', {}, { withCredentials: true });
+        const refreshEndpoint = apiBaseURL.endsWith('/api')
+          ? `${apiBaseURL}/auth/refresh`
+          : `${apiBaseURL}/api/auth/refresh`;
+        await axios.post(refreshEndpoint, {}, { withCredentials: true });
         return apiClient(originalRequest);
       } catch {
         // Refresh failed — reject cleanly without hijacking public routes

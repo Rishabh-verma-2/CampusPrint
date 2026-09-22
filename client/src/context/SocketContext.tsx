@@ -24,7 +24,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Connect to the Socket.IO server.
     // The server reads the JWT from the cookie for authentication.
     // We also pass userId + role so the server can assign the correct private rooms.
-    const newSocket = io('/', {
+    const backendUrl =
+      import.meta.env.VITE_SOCKET_URL ||
+      import.meta.env.VITE_BACKEND_URL ||
+      (import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, '') : '') ||
+      (import.meta.env.PROD ? 'https://campusprint-3agy.onrender.com' : '/');
+
+    const newSocket = io(backendUrl, {
       withCredentials: true,
       auth: { userId: user._id, role: user.role },
       transports: ['websocket', 'polling'],

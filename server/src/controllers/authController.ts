@@ -19,17 +19,20 @@ const generateTokens = (userId: string, role: string, email?: string) => {
   return { accessToken, refreshToken };
 };
 
+const getCookieOptions = (): import('express').CookieOptions => ({
+  httpOnly: true,
+  secure: env.isProd(),
+  sameSite: env.isProd() ? 'none' : 'lax',
+});
+
 const setTokenCookies = (res: Response, accessToken: string, refreshToken: string) => {
+  const options = getCookieOptions();
   res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: env.isProd(),
-    sameSite: 'lax',
+    ...options,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
   res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: env.isProd(),
-    sameSite: 'lax',
+    ...options,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   });
 };
@@ -313,8 +316,9 @@ export const logout = asyncHandler(async (req: AuthRequest, res: Response) => {
   if (req.user) {
     await User.findByIdAndUpdate(req.user._id, { refreshToken: null });
   }
-  res.clearCookie('accessToken');
-  res.clearCookie('refreshToken');
+  const options = getCookieOptions();
+  res.clearCookie('accessToken', options);
+  res.clearCookie('refreshToken', options);
   res.json({ success: true, message: 'Logged out successfully' });
 });
 
