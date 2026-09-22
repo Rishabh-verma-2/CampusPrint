@@ -12,6 +12,8 @@ export interface IPrintJob extends Document {
     campusId: mongoose.Types.ObjectId;
     documentId: mongoose.Types.ObjectId;
     documentIds?: mongoose.Types.ObjectId[];
+    originalDocumentId?: mongoose.Types.ObjectId;
+    isCustomPdf?: boolean;
     status: PrintJobStatus;
     printConfig: PrintConfig;
     priceSnapshot: PriceSnapshot;

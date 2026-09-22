@@ -1,5 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { PDFDocument } from 'pdf-lib';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   X,
@@ -19,6 +21,10 @@ import {
   AlertCircle,
   HelpCircle,
   Loader2,
+  Download,
+  Eye,
+  Scissors,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { documentApi } from '../../api/documentApi';
@@ -85,6 +91,13 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
   const [createdJob, setCreatedJob] = useState<PrintJob | null>(null);
   const [copiedToken, setCopiedToken] = useState(false);
 
+  // Custom Range Preview State
+  const [isProcessingRange, setIsProcessingRange] = useState(false);
+  const [processedPdfUrl, setProcessedPdfUrl] = useState<string | null>(null);
+  const [processedPdfName, setProcessedPdfName] = useState<string>('');
+  const [processedPageCount, setProcessedPageCount] = useState<number>(0);
+  const [showPdfPreviewModal, setShowPdfPreviewModal] = useState(false);
+
   // ─── Real Backend Vendors Query ─────────────────────────────────────────────
   const {
     data: vendorsData,
@@ -100,6 +113,13 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
   });
 
   const vendors: Vendor[] = vendorsData || [];
+
+  // Cleanup blob URLs when component unmounts or URL changes
+  useEffect(() => {
+    return () => {
+      if (processedPdfUrl) URL.revokeObjectURL(processedPdfUrl);
+    };
+  }, [processedPdfUrl]);
 
   // Reset modal state when closed or opened fresh
   const handleModalClose = () => {
@@ -119,7 +139,86 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
       setOrientation('AUTO');
       setCreatedJob(null);
       setCopiedToken(false);
+      if (processedPdfUrl) URL.revokeObjectURL(processedPdfUrl);
+      setProcessedPdfUrl(null);
+      setProcessedPdfName('');
+      setProcessedPageCount(0);
     }, 200);
+  };
+
+  // ─── Parse Custom Range String ───────────────────────────────────────────────
+  const parsePageRange = (rangeStr: string, totalPages: number): number[] => {
+    const seen = new Set<number>();
+    const parts = rangeStr.split(',').map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (part.includes('-')) {
+        const [rawStart, rawEnd] = part.split('-').map(Number);
+        const start = Math.max(1, rawStart);
+        const end = Math.min(totalPages, rawEnd);
+        if (!isNaN(start) && !isNaN(end) && start <= end) {
+          for (let i = start; i <= end; i++) seen.add(i);
+        }
+      } else {
+        const num = Number(part);
+        if (!isNaN(num) && num >= 1 && num <= totalPages) seen.add(num);
+      }
+    }
+    return Array.from(seen).sort((a, b) => a - b);
+  };
+
+  // ─── Apply Custom Range: Extract pages using pdf-lib ────────────────────────
+  const applyCustomRange = async () => {
+    if (!documents[0] || !customPages.trim()) {
+      toast.error('Please enter a page range first');
+      return;
+    }
+
+    const doc = documents[0];
+    const totalPages = doc.pageCount || 1;
+    const pages = parsePageRange(customPages, totalPages);
+
+    if (pages.length === 0) {
+      toast.error(`No valid pages found. Document has ${totalPages} pages.`);
+      return;
+    }
+
+    setIsProcessingRange(true);
+    try {
+      // Fetch raw PDF bytes through the authenticated API endpoint
+      const response = await (await import('../../api/apiClient')).default.get(
+        `/documents/${doc._id}/download`,
+        { responseType: 'arraybuffer' }
+      );
+      const arrayBuffer = response.data as ArrayBuffer;
+
+      // Use pdf-lib to create a new PDF with only selected pages
+      const srcPdf = await PDFDocument.load(arrayBuffer);
+      const newPdf = await PDFDocument.create();
+
+      // pdf-lib uses 0-based index
+      const pageIndices = pages.map((p) => p - 1);
+      const copiedPages = await newPdf.copyPages(srcPdf, pageIndices);
+      for (const page of copiedPages) {
+        newPdf.addPage(page);
+      }
+
+      const pdfBytes = await newPdf.save();
+      const blob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+
+      if (processedPdfUrl) URL.revokeObjectURL(processedPdfUrl);
+
+      const blobUrl = URL.createObjectURL(blob);
+      setProcessedPdfUrl(blobUrl);
+      setProcessedPdfName(doc.originalName);
+      setProcessedPageCount(pages.length);
+
+      toast.success(`Preview ready — ${pages.length} page${pages.length > 1 ? 's' : ''} extracted`);
+    } catch (err: any) {
+      console.error('PDF processing error:', err);
+      toast.error(err?.message || 'Failed to process PDF. Please try again.');
+    } finally {
+      setIsProcessingRange(false);
+    }
   };
 
   // ─── Document Upload Handlers ────────────────────────────────────────────────
@@ -803,17 +902,104 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
                 </div>
 
                 {pageMode === 'custom' && (
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      placeholder="e.g. 1-3, 5"
-                      value={customPages}
-                      onChange={(e) => setCustomPages(e.target.value)}
-                      className="w-full text-xs p-2.5 rounded-lg border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
-                    />
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Specify page numbers or ranges separated by commas.
+                  <div className="mt-3 space-y-3">
+                    {/* Input + Apply Row */}
+                    <div className="flex gap-2 items-stretch">
+                      <div className="relative flex-1">
+                        <Scissors className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="e.g. 1-4, 6, 7"
+                          value={customPages}
+                          onChange={(e) => {
+                            setCustomPages(e.target.value);
+                            // Clear preview when user edits
+                            if (processedPdfUrl) {
+                              URL.revokeObjectURL(processedPdfUrl);
+                              setProcessedPdfUrl(null);
+                            }
+                          }}
+                          className="w-full pl-8 pr-3 py-2.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono bg-white"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={applyCustomRange}
+                        disabled={isProcessingRange || !customPages.trim() || documents.length !== 1}
+                        className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-colors flex items-center gap-1.5 flex-shrink-0 shadow-xs"
+                      >
+                        {isProcessingRange ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Processing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye size={13} />
+                            <span>Apply</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400">
+                      Enter page numbers or ranges separated by commas — e.g. <span className="font-mono text-slate-500">1-4, 6, 7</span>
+                      {documents.length === 1 && documents[0].pageCount ? (
+                        <span className="ml-1 text-slate-400">(Doc has {documents[0].pageCount} pages)</span>
+                      ) : null}
                     </p>
+
+                    <div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50/80 p-2.5 rounded-xl border border-emerald-200">
+                      <CheckCircle2 size={14} className="flex-shrink-0 text-emerald-600" />
+                      <span>
+                        The vendor will receive an <strong>updated custom PDF</strong> containing only your selected pages, not your original full document.
+                      </span>
+                    </div>
+
+                    {/* Compact Result Card */}
+                    {processedPdfUrl && (
+                      <div className="flex items-center gap-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/60">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
+                          <FileText size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 truncate">
+                            {processedPdfName}
+                          </p>
+                          <p className="text-[10px] text-emerald-700 font-medium mt-0.5">
+                            ✓ {processedPageCount} page{processedPageCount !== 1 ? 's' : ''} extracted
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowPdfPreviewModal(true)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-semibold transition-colors shadow-xs"
+                          >
+                            <Eye size={12} />
+                            <span>Preview</span>
+                          </button>
+                          <a
+                            href={processedPdfUrl}
+                            download={processedPdfName}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold transition-colors shadow-xs"
+                          >
+                            <Download size={11} />
+                            <span>Save</span>
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Processing overlay hint */}
+                    {isProcessingRange && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg border border-blue-100 bg-blue-50/60">
+                        <Loader2 size={14} className="animate-spin text-blue-600 flex-shrink-0" />
+                        <p className="text-xs text-blue-700 font-medium">
+                          Extracting pages from your PDF — this may take a moment...
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1148,6 +1334,79 @@ export const NewPrintModal: React.FC<NewPrintModalProps> = ({
             </div>
           )}
         </div>
+
+        {/* ─── PDF Preview Modal (portal — renders above everything) ─────────── */}
+        {showPdfPreviewModal && processedPdfUrl && createPortal(
+          <div
+            className="fixed inset-0 z-[9999] bg-black/85 flex flex-col"
+            style={{ animation: 'fadeIn 0.2s ease' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200 flex-shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center flex-shrink-0">
+                  <FileText size={14} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-900 truncate max-w-[140px] sm:max-w-[260px]">
+                    {processedPdfName}
+                  </p>
+                  <p className="text-[10px] text-blue-600 font-semibold">
+                    {processedPageCount} page{processedPageCount !== 1 ? 's' : ''} · Custom range
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <a
+                  href={processedPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
+                  title="Open full PDF in new tab"
+                >
+                  <ExternalLink size={13} />
+                  <span className="hidden sm:inline">Open in Tab</span>
+                </a>
+                <a
+                  href={processedPdfUrl}
+                  download={processedPdfName}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+                >
+                  <Download size={13} />
+                  <span className="hidden sm:inline">Save PDF</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowPdfPreviewModal(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-600 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            {/* PDF iframe */}
+            <div className="flex-1 overflow-hidden relative bg-slate-800">
+              <iframe
+                src={processedPdfUrl}
+                title={processedPdfName}
+                className="w-full h-full border-0"
+              />
+            </div>
+            {/* Mobile helper notice */}
+            <div className="sm:hidden px-3 py-2 bg-slate-900/90 text-center text-[11px] text-slate-300 flex items-center justify-center gap-2">
+              <span>Viewing on phone?</span>
+              <a
+                href={processedPdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 underline font-semibold flex items-center gap-1"
+              >
+                Open in Browser <ExternalLink size={11} />
+              </a>
+            </div>
+          </div>,
+          document.body
+        )}
 
       </div>
     </div>

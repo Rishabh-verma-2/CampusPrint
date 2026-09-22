@@ -47,6 +47,8 @@ const printJobSchema = new mongoose_1.Schema({
     campusId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Campus', required: true },
     documentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Document', required: true },
     documentIds: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Document' }],
+    originalDocumentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Document' },
+    isCustomPdf: { type: Boolean, default: false },
     status: {
         type: String,
         enum: [

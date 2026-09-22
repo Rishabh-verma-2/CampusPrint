@@ -1,3 +1,5 @@
+import path from 'path';
+import fs from 'fs';
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authenticate';
 import { asyncHandler, createError } from '../middleware/errorHandler';
@@ -9,7 +11,8 @@ import { User } from '../models/User';
 import { StudentProfile } from '../models/StudentProfile';
 import { Settings } from '../models/Settings';
 import { StorageService } from '../services/StorageService';
-import { PricingService, parsePageRanges } from '../services/PricingService';
+import { PricingService, parsePageRanges, extractPageNumbers } from '../services/PricingService';
+import { PdfService } from '../services/PdfService';
 import { PrintJobStateMachine } from '../services/PrintJobStateMachine';
 import { TokenService } from '../services/TokenService';
 import { NotificationService } from '../services/NotificationService';
@@ -51,15 +54,72 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
 
   // Calculate total pages across all selected documents
   const combinedRawPages = documents.reduce((sum, d) => sum + (d.pageCount || 1), 0);
+  const isCustomRange =
+    documents.length === 1 &&
+    Boolean(printConfig?.pageRanges) &&
+    printConfig.pageRanges.trim().toLowerCase() !== 'all';
+
   let totalPages: number;
+  let pageNumbers: number[] = [];
+
   try {
-    if (documents.length === 1 && printConfig?.pageRanges && printConfig.pageRanges !== 'all') {
-      totalPages = parsePageRanges(printConfig.pageRanges, documents[0].pageCount || 1);
+    if (isCustomRange) {
+      pageNumbers = extractPageNumbers(printConfig.pageRanges, documents[0].pageCount || 1);
+      totalPages = pageNumbers.length;
     } else {
       totalPages = combinedRawPages;
     }
   } catch (e: unknown) {
     throw createError((e as Error).message, 400, 'INVALID_PAGE_RANGE');
+  }
+
+  // ─── If Custom Page Range: Generate and Store the Updated Sliced PDF ───────
+  let targetDocument = documents[0];
+  let isCustomPdf = false;
+  const originalDoc = documents[0];
+
+  if (isCustomRange && pageNumbers.length > 0) {
+    try {
+      const srcBuffer = await StorageService.getFileBuffer(
+        originalDoc.storageKey,
+        originalDoc.storageProvider
+      );
+      const extractedBuffer = await PdfService.extractPages(srcBuffer, pageNumbers);
+
+      const ext = path.extname(originalDoc.originalName) || '.pdf';
+      const base = path.basename(originalDoc.originalName, ext);
+      const customOriginalName = `${base} (Pages ${printConfig.pageRanges.trim()})${ext}`;
+
+      const uploadResult = await StorageService.uploadBuffer(
+        extractedBuffer,
+        customOriginalName
+      );
+
+      const customDoc = await DocumentModel.create({
+        ownerId: req.user!._id,
+        fileName: uploadResult.fileName,
+        originalName: customOriginalName,
+        fileType: 'application/pdf',
+        fileSize: extractedBuffer.length,
+        pageCount: pageNumbers.length,
+        storageProvider: uploadResult.storageProvider,
+        storageKey: uploadResult.storageKey,
+        storageUrl: uploadResult.storageUrl,
+      });
+
+      targetDocument = customDoc;
+      isCustomPdf = true;
+      console.log(
+        `[createPrintJob] Created updated custom PDF document ${customDoc._id} (${pageNumbers.length} pages: ${printConfig.pageRanges}) for student ${req.user!._id}`
+      );
+    } catch (pdfErr: any) {
+      console.error('[createPrintJob] Failed to generate custom PDF:', pdfErr);
+      throw createError(
+        `Failed to process custom PDF: ${pdfErr.message || 'Page extraction failed'}`,
+        500,
+        'PDF_PROCESSING_FAILED'
+      );
+    }
   }
 
   const configWithPages = {
@@ -77,7 +137,7 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
   const feeDoc = await Settings.findOne({ key: { $in: ['platformFee', 'PLATFORM_FEE'] } }).lean();
   const platformFee = feeDoc?.value !== undefined ? Number(feeDoc.value) : 2;
 
-  const pricing = PricingService.calculate(configWithPages, priceSnapshot, totalPages, platformFee);
+  const pricing = PricingService.calculate(configWithPages, priceSnapshot, combinedRawPages, platformFee);
   const publicToken = await TokenService.generateUniqueToken(vendor._id.toString());
 
   const student = await User.findById(req.user!._id);
@@ -98,8 +158,10 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
     vendorId: vendor._id,
     universityId: vendor.universityId,
     campusId: vendor.campusId,
-    documentId: documents[0]._id,
-    documentIds: documents.map((d) => d._id),
+    documentId: targetDocument._id,
+    documentIds: isCustomPdf ? [targetDocument._id] : documents.map((d) => d._id),
+    originalDocumentId: isCustomPdf ? originalDoc._id : undefined,
+    isCustomPdf,
     status: 'PAYMENT_PENDING', // Job starts awaiting payment
     printConfig: configWithPages,
     priceSnapshot,
@@ -123,13 +185,15 @@ export const createPrintJob = asyncHandler(async (req: AuthRequest, res: Respons
         status: printJob.status,
         pricing: printJob.pricing,
         printConfig: printJob.printConfig,
+        isCustomPdf: printJob.isCustomPdf,
         vendorId: {
           _id: vendor._id,
           shopName: vendor.shopName,
           address: vendor.address,
         },
-        documentId: documents[0],
-        documentIds: documents,
+        documentId: targetDocument,
+        documentIds: isCustomPdf ? [targetDocument] : documents,
+        originalDocumentId: isCustomPdf ? originalDoc : undefined,
         createdAt: printJob.createdAt,
       },
     },
@@ -161,8 +225,9 @@ export const getMyPrintJobs = asyncHandler(async (req: AuthRequest, res: Respons
 
 export const getPrintJob = asyncHandler(async (req: AuthRequest, res: Response) => {
   const job = await PrintJob.findById(req.params.id)
-    .populate('documentId', 'originalName fileSize pageCount')
-    .populate('documentIds', 'originalName fileSize pageCount')
+    .populate('documentId', 'originalName fileSize pageCount fileType')
+    .populate('documentIds', 'originalName fileSize pageCount fileType')
+    .populate('originalDocumentId', 'originalName fileSize pageCount fileType')
     .populate('vendorId', 'shopName address phone')
     .populate('studentId', 'name email phone')
     .lean();
@@ -223,6 +288,22 @@ export const downloadPrintJobFile = asyncHandler(async (req: AuthRequest, res: R
   const docId = (job.documentId as any)?._id || job.documentId;
   const doc = await DocumentModel.findById(docId);
   if (!doc) throw createError('Document not found or already deleted', 404, 'DOCUMENT_NOT_FOUND');
+
+  if (doc.storageProvider === 'local') {
+    const filePath = path.resolve(process.cwd(), doc.storageKey);
+    if (!fs.existsSync(filePath)) {
+      throw createError('File not found on disk', 404, 'FILE_NOT_FOUND');
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(doc.originalName)}"`
+    );
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    return;
+  }
 
   const fileUrl = await StorageService.getSignedUrl(doc.storageKey, doc.storageProvider);
   res.redirect(fileUrl);
@@ -421,6 +502,12 @@ export const collectPrintJob = asyncHandler(async (req: AuthRequest, res: Respon
     const dId = (job.documentId as any)?._id || job.documentId;
     docIdsToClean.push(dId.toString());
   }
+  if (job.originalDocumentId) {
+    const oId = (job.originalDocumentId as any)?._id || job.originalDocumentId;
+    if (oId && !docIdsToClean.includes(oId.toString())) {
+      docIdsToClean.push(oId.toString());
+    }
+  }
   if (Array.isArray(job.documentIds) && job.documentIds.length > 0) {
     for (const d of job.documentIds) {
       const dId = (d as any)?._id || d;
@@ -438,7 +525,11 @@ export const collectPrintJob = asyncHandler(async (req: AuthRequest, res: Respon
         const otherActiveJob = await PrintJob.findOne({
           _id: { $ne: job._id },
           status: { $nin: ['COLLECTED', 'CANCELLED', 'FAILED'] },
-          $or: [{ documentId: doc._id }, { documentIds: doc._id }],
+          $or: [
+            { documentId: doc._id },
+            { documentIds: doc._id },
+            { originalDocumentId: doc._id },
+          ],
         });
 
         if (!otherActiveJob) {

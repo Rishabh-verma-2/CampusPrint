@@ -7,6 +7,11 @@ const router = (0, express_1.Router)();
 // Student
 router.post('/', authenticate_1.authenticate, authenticate_1.requireStudent, printJobController_1.createPrintJob);
 router.get('/', authenticate_1.authenticate, printJobController_1.getMyPrintJobs);
+// Payment status for a specific print job — GET /api/print-jobs/:id/payment-status
+// Queue position for a specific print job — GET /api/print-jobs/:id/queue-position
+// Must be registered BEFORE /:id to avoid route shadowing
+router.get('/:id/payment-status', authenticate_1.authenticate, printJobController_1.getJobPaymentStatus);
+router.get('/:id/queue-position', authenticate_1.authenticate, printJobController_1.getQueuePosition);
 router.get('/:id', authenticate_1.authenticate, printJobController_1.getPrintJob);
 router.get('/:id/file', authenticate_1.authenticate, printJobController_1.downloadPrintJobFile);
 router.post('/:id/cancel', authenticate_1.authenticate, printJobController_1.cancelPrintJob);

@@ -18,6 +18,8 @@ export interface IPrintJob extends Document {
   campusId: mongoose.Types.ObjectId;
   documentId: mongoose.Types.ObjectId;
   documentIds?: mongoose.Types.ObjectId[];
+  originalDocumentId?: mongoose.Types.ObjectId;
+  isCustomPdf?: boolean;
   status: PrintJobStatus;
   printConfig: PrintConfig;
   priceSnapshot: PriceSnapshot;
@@ -50,6 +52,8 @@ const printJobSchema = new Schema<IPrintJob>(
     campusId: { type: Schema.Types.ObjectId, ref: 'Campus', required: true },
     documentId: { type: Schema.Types.ObjectId, ref: 'Document', required: true },
     documentIds: [{ type: Schema.Types.ObjectId, ref: 'Document' }],
+    originalDocumentId: { type: Schema.Types.ObjectId, ref: 'Document' },
+    isCustomPdf: { type: Boolean, default: false },
     status: {
       type: String,
       enum: [

@@ -291,11 +291,18 @@ const VendorQueuePage: React.FC = () => {
 
                   {/* Document and Print Specifications */}
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2 mb-4 text-xs">
-                    <div className="flex items-center gap-2 font-medium text-slate-700">
-                      <FileText size={14} className="text-blue-500 flex-shrink-0" />
-                      <span className="truncate" title={doc?.originalName}>
-                        {doc?.originalName || 'Document.pdf'}
-                      </span>
+                    <div className="flex items-center justify-between gap-2 font-medium text-slate-700">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText size={14} className="text-blue-500 flex-shrink-0" />
+                        <span className="truncate" title={doc?.originalName}>
+                          {doc?.originalName || 'Document.pdf'}
+                        </span>
+                      </div>
+                      {(job.isCustomPdf || (job.printConfig?.pageRanges && job.printConfig.pageRanges !== 'all')) && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex-shrink-0">
+                          Custom PDF
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-slate-200/50">

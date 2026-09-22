@@ -78,12 +78,19 @@ class CashfreeService {
      */
     static async createOrder(params) {
         console.log(`[Cashfree] Creating order: ${params.orderId} | Amount: ₹${params.orderAmount}`);
+        const orderMeta = {
+            return_url: params.orderMeta.return_url,
+            notify_url: params.orderMeta.notify_url,
+        };
+        if (params.orderMeta.payment_methods) {
+            orderMeta.payment_methods = params.orderMeta.payment_methods;
+        }
         const body = {
             order_id: params.orderId,
             order_amount: params.orderAmount,
             order_currency: params.currency,
             customer_details: params.customer,
-            order_meta: params.orderMeta,
+            order_meta: orderMeta,
         };
         if (params.orderNote) {
             body.order_note = params.orderNote;

@@ -8,7 +8,7 @@ exports.PrintJobStateMachine = void 0;
 const VALID_TRANSITIONS = {
     PAYMENT_PENDING: ['PAID', 'CANCELLED'],
     PAID: ['QUEUED'],
-    QUEUED: ['ACCEPTED', 'CANCELLED'],
+    QUEUED: ['ACCEPTED', 'PRINTING', 'CANCELLED'],
     ACCEPTED: ['PRINTING', 'CANCELLED'],
     PRINTING: ['READY', 'FAILED'],
     READY: ['COLLECTED'],

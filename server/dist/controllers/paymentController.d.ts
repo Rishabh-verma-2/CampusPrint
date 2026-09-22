@@ -4,4 +4,5 @@ export declare const getPaymentStatus: (req: Request, res: Response, next: impor
 export declare const handlePaymentWebhook: (req: Request, res: Response) => Promise<void>;
 export declare const getPayment: (req: Request, res: Response, next: import("express").NextFunction) => void;
 export declare const getPaymentByJob: (req: Request, res: Response, next: import("express").NextFunction) => void;
+export declare const simulatePaymentSuccess: (req: Request, res: Response, next: import("express").NextFunction) => void;
 //# sourceMappingURL=paymentController.d.ts.map

@@ -7,12 +7,19 @@ const PLATFORM_FEE = 2; // ₹ — configurable from Settings in future
  * Returns total unique page count
  */
 export function parsePageRanges(pageRanges: string, totalDocPages: number): number {
+  return extractPageNumbers(pageRanges, totalDocPages).length;
+}
+
+/**
+ * Extract sorted unique 1-indexed page numbers from a range string
+ */
+export function extractPageNumbers(pageRanges: string, totalDocPages: number): number[] {
   if (!pageRanges || pageRanges.trim().toLowerCase() === 'all') {
-    return totalDocPages;
+    return Array.from({ length: totalDocPages }, (_, i) => i + 1);
   }
 
   const pages = new Set<number>();
-  const parts = pageRanges.split(',').map((s) => s.trim());
+  const parts = pageRanges.split(',').map((s) => s.trim()).filter(Boolean);
 
   for (const part of parts) {
     if (part.includes('-')) {
@@ -33,7 +40,7 @@ export function parsePageRanges(pageRanges: string, totalDocPages: number): numb
     }
   }
 
-  return pages.size;
+  return Array.from(pages).sort((a, b) => a - b);
 }
 
 /**

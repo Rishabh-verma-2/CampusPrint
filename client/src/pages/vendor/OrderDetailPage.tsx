@@ -234,11 +234,19 @@ const VendorOrderDetailPage: React.FC = () => {
               <div className="text-sm font-bold text-slate-900 truncate">
                 {doc?.originalName || 'Document.pdf'}
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {job.printConfig?.totalPages || doc?.pageCount || 1} pages ·{' '}
-                {job.printConfig?.pageRanges === 'all'
-                  ? 'All pages'
-                  : `Pages: ${job.printConfig?.pageRanges}`}
+              <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-2">
+                <span>{job.printConfig?.totalPages || doc?.pageCount || 1} pages</span>
+                <span>·</span>
+                <span>
+                  {job.printConfig?.pageRanges === 'all'
+                    ? 'All pages'
+                    : `Pages: ${job.printConfig?.pageRanges}`}
+                </span>
+                {(job.isCustomPdf || (job.printConfig?.pageRanges && job.printConfig.pageRanges !== 'all')) && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                    ⚡ Updated Custom PDF
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -261,6 +269,15 @@ const VendorOrderDetailPage: React.FC = () => {
             </a>
           ) : null}
         </div>
+
+        {(job.isCustomPdf || (job.printConfig?.pageRanges && job.printConfig.pageRanges !== 'all')) && !isCompleted && (
+          <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-50 p-3 rounded-xl border border-amber-200">
+            <span className="text-base">📄</span>
+            <span>
+              <strong>Ready to print directly:</strong> This PDF contains only the student's selected pages ({job.printConfig?.pageRanges}). No need to configure page ranges on your printer.
+            </span>
+          </div>
+        )}
 
         {isCompleted && (
           <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">

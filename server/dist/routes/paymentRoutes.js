@@ -34,12 +34,14 @@ router.post('/webhook', rawBodyCapture, paymentController_1.handlePaymentWebhook
 // ─── Student Routes ────────────────────────────────────────────────────────────
 // Create Cashfree payment order for a PrintJob
 router.post('/create-order', authenticate_1.authenticate, authenticate_1.requireStudent, paymentController_1.createPaymentOrder);
+// Simulate payment success (dev/sandbox testing)
+router.post('/simulate-success', authenticate_1.authenticate, authenticate_1.requireStudent, paymentController_1.simulatePaymentSuccess);
 // Verify payment status — called by frontend return page
 // Fetches actual status from Cashfree API (don't trust query params from Cashfree return URL)
 router.get('/status/:orderId', authenticate_1.authenticate, paymentController_1.getPaymentStatus);
-// Get payment by job (for student order detail)
+// Get payment by PrintJob ID
 router.get('/by-job/:jobId', authenticate_1.authenticate, paymentController_1.getPaymentByJob);
-// Get payment by internal ID
+// Get payment by ID
 router.get('/:id', authenticate_1.authenticate, paymentController_1.getPayment);
 exports.default = router;
 //# sourceMappingURL=paymentRoutes.js.map

@@ -10,4 +10,6 @@ export declare const cancelPrintJob: (req: import("express").Request, res: Respo
 export declare const collectPrintJob: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const verifyPickupToken: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 export declare const reportProblem: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getQueuePosition: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
+export declare const getJobPaymentStatus: (req: import("express").Request, res: Response, next: import("express").NextFunction) => void;
 //# sourceMappingURL=printJobController.d.ts.map

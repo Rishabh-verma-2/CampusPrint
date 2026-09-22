@@ -88,6 +88,8 @@ export interface PrintJob {
   vendorId: string | Vendor;
   documentId: string | DocumentFile;
   documentIds?: (string | DocumentFile)[];
+  originalDocumentId?: string | DocumentFile;
+  isCustomPdf?: boolean;
   status: PrintJobStatus;
   printConfig: PrintConfig;
   pricing: PriceBreakdown;

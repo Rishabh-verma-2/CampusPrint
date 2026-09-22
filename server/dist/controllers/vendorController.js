@@ -56,12 +56,13 @@ exports.getVendorDashboard = (0, errorHandler_1.asyncHandler)(async (req, res) =
         PrintJob_1.PrintJob.countDocuments({ vendorId: vendor._id, status: 'READY' }),
         PrintJob_1.PrintJob.countDocuments({ vendorId: vendor._id, status: 'COLLECTED', createdAt: { $gte: today } }),
     ]);
-    // Today's revenue
+    // Today's confirmed revenue — counts from QUEUED onwards since payment is captured at order time
+    // (Cashfree charges the student immediately; vendor's earnings are confirmed when job is QUEUED)
     const revenueAgg = await PrintJob_1.PrintJob.aggregate([
         {
             $match: {
                 vendorId: vendor._id,
-                status: { $in: ['COLLECTED', 'READY'] },
+                status: { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY', 'COLLECTED'] },
                 createdAt: { $gte: today },
             },
         },
@@ -114,16 +115,31 @@ exports.getVendorQueue = (0, errorHandler_1.asyncHandler)(async (req, res) => {
         throw (0, errorHandler_1.createError)('Vendor not found', 404, 'VENDOR_NOT_FOUND');
     const { status, page = 1, limit = 20, sort = 'oldest' } = req.query;
     const filter = { vendorId: vendor._id };
+    let sortDir = sort === 'newest' ? -1 : 1;
     if (status && status !== 'all') {
-        if (status === 'new')
+        const s = status.toLowerCase();
+        if (s === 'new') {
             filter.status = 'QUEUED';
-        else
+        }
+        else if (s === 'printing') {
+            filter.status = { $in: ['ACCEPTED', 'PRINTING'] };
+        }
+        else if (s === 'ready') {
+            filter.status = 'READY';
+        }
+        else if (s === 'completed' || s === 'collected') {
+            filter.status = 'COLLECTED';
+            // For completed jobs, show most recent completions first by default
+            if (sort === 'oldest')
+                sortDir = -1;
+        }
+        else {
             filter.status = status.toUpperCase();
+        }
     }
     else {
         filter.status = { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY'] };
     }
-    const sortDir = sort === 'newest' ? -1 : 1;
     const jobs = await PrintJob_1.PrintJob.find(filter)
         .populate('studentId', 'name phone enrollmentNumber')
         .populate('documentId', 'originalName pageCount fileSize')
@@ -186,7 +202,7 @@ exports.getVendorAnalytics = (0, errorHandler_1.asyncHandler)(async (req, res) =
             {
                 $match: {
                     vendorId: vendor._id,
-                    status: { $in: ['COLLECTED', 'READY'] },
+                    status: { $in: ['QUEUED', 'ACCEPTED', 'PRINTING', 'READY', 'COLLECTED'] },
                     createdAt: { $gte: from },
                 },
             },

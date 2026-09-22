@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import { env } from '../config/env';
 
 export interface UploadResult {
@@ -37,6 +38,69 @@ export class StorageService {
     }
 
     return this.storeLocally(localPath, originalName);
+  }
+
+  /**
+   * Upload an in-memory buffer directly to storage (local disk or Cloudinary).
+   */
+  static async uploadBuffer(
+    buffer: Buffer,
+    originalName: string
+  ): Promise<UploadResult> {
+    this.ensureUploadsDir();
+
+    const ext = path.extname(originalName) || '.pdf';
+    const uniqueFileName = `doc_${Date.now()}_${uuidv4().slice(0, 8)}${ext}`;
+    const localPath = path.join(this.uploadsDir, uniqueFileName);
+
+    fs.writeFileSync(localPath, buffer);
+
+    const hasCloudinary =
+      env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET;
+
+    if (hasCloudinary) {
+      return this.uploadToCloudinary(localPath, originalName);
+    }
+
+    return this.storeLocally(localPath, originalName);
+  }
+
+  /**
+   * Retrieve the raw file bytes for a document from local disk or Cloudinary.
+   */
+  static async getFileBuffer(
+    storageKey: string,
+    provider: 'local' | 'cloudinary'
+  ): Promise<Buffer> {
+    if (provider === 'local') {
+      const filePath = path.resolve(process.cwd(), storageKey);
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`File not found at ${filePath}`);
+      }
+      return fs.readFileSync(filePath);
+    }
+
+    // Cloudinary download
+    const signedUrl = await this.getSignedUrl(storageKey, provider);
+    const https = await import('https');
+    const http = await import('http');
+    const client = signedUrl.startsWith('https') ? https : http;
+
+    return new Promise((resolve, reject) => {
+      client
+        .get(signedUrl, (res: any) => {
+          if (res.statusCode && res.statusCode >= 400) {
+            return reject(
+              new Error(`Failed to fetch file from Cloudinary (HTTP ${res.statusCode})`)
+            );
+          }
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        })
+        .on('error', reject);
+    });
   }
 
   private static storeLocally(localPath: string, originalName: string): UploadResult {

@@ -140,3 +140,52 @@ export const deleteDocument = asyncHandler(async (req: AuthRequest, res: Respons
 
   res.json({ success: true, message: 'Document deleted' });
 });
+
+export const downloadDocument = asyncHandler(async (req: AuthRequest, res: Response) => {
+  const document = await DocumentModel.findById(req.params.id);
+
+  if (!document || document.isDeleted) {
+    throw createError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
+  }
+
+  // Only owner can download
+  if (document.ownerId.toString() !== req.user!._id) {
+    throw createError('Access denied', 403, 'FORBIDDEN');
+  }
+
+  if (document.storageProvider === 'local') {
+    // Serve directly from disk
+    const filePath = path.resolve(process.cwd(), document.storageKey);
+    if (!fs.existsSync(filePath)) {
+      throw createError('File not found on disk', 404, 'FILE_NOT_FOUND');
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(document.originalName)}"`
+    );
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    return;
+  }
+
+  // Cloudinary: fetch the raw file and pipe it
+  const signedUrl = await StorageService.getSignedUrl(document.storageKey, document.storageProvider);
+  const https = await import('https');
+  const http = await import('http');
+  const fileUrl = new URL(signedUrl);
+  const client = fileUrl.protocol === 'https:' ? https : http;
+
+  client.get(signedUrl, (fileRes: any) => {
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${encodeURIComponent(document.originalName)}"`
+    );
+    fileRes.pipe(res);
+  }).on('error', () => {
+    res.status(500).json({ success: false, message: 'Failed to stream file' });
+  });
+});
+

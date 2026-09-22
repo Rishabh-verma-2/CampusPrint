@@ -2,17 +2,24 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PricingService = void 0;
 exports.parsePageRanges = parsePageRanges;
+exports.extractPageNumbers = extractPageNumbers;
 const PLATFORM_FEE = 2; // ₹ — configurable from Settings in future
 /**
  * Parse page ranges like "1-5, 8, 10-12" or "all"
  * Returns total unique page count
  */
 function parsePageRanges(pageRanges, totalDocPages) {
+    return extractPageNumbers(pageRanges, totalDocPages).length;
+}
+/**
+ * Extract sorted unique 1-indexed page numbers from a range string
+ */
+function extractPageNumbers(pageRanges, totalDocPages) {
     if (!pageRanges || pageRanges.trim().toLowerCase() === 'all') {
-        return totalDocPages;
+        return Array.from({ length: totalDocPages }, (_, i) => i + 1);
     }
     const pages = new Set();
-    const parts = pageRanges.split(',').map((s) => s.trim());
+    const parts = pageRanges.split(',').map((s) => s.trim()).filter(Boolean);
     for (const part of parts) {
         if (part.includes('-')) {
             const [start, end] = part.split('-').map(Number);
@@ -33,7 +40,7 @@ function parsePageRanges(pageRanges, totalDocPages) {
             pages.add(p);
         }
     }
-    return pages.size;
+    return Array.from(pages).sort((a, b) => a - b);
 }
 /**
  * Calculate effective pages printed per copy.

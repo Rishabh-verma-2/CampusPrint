@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StorageService = void 0;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const uuid_1 = require("uuid");
 const env_1 = require("../config/env");
 /**
  * Abstracted storage service.
@@ -61,6 +62,51 @@ class StorageService {
             return this.uploadToCloudinary(localPath, originalName);
         }
         return this.storeLocally(localPath, originalName);
+    }
+    /**
+     * Upload an in-memory buffer directly to storage (local disk or Cloudinary).
+     */
+    static async uploadBuffer(buffer, originalName) {
+        this.ensureUploadsDir();
+        const ext = path_1.default.extname(originalName) || '.pdf';
+        const uniqueFileName = `doc_${Date.now()}_${(0, uuid_1.v4)().slice(0, 8)}${ext}`;
+        const localPath = path_1.default.join(this.uploadsDir, uniqueFileName);
+        fs_1.default.writeFileSync(localPath, buffer);
+        const hasCloudinary = env_1.env.CLOUDINARY_CLOUD_NAME && env_1.env.CLOUDINARY_API_KEY && env_1.env.CLOUDINARY_API_SECRET;
+        if (hasCloudinary) {
+            return this.uploadToCloudinary(localPath, originalName);
+        }
+        return this.storeLocally(localPath, originalName);
+    }
+    /**
+     * Retrieve the raw file bytes for a document from local disk or Cloudinary.
+     */
+    static async getFileBuffer(storageKey, provider) {
+        if (provider === 'local') {
+            const filePath = path_1.default.resolve(process.cwd(), storageKey);
+            if (!fs_1.default.existsSync(filePath)) {
+                throw new Error(`File not found at ${filePath}`);
+            }
+            return fs_1.default.readFileSync(filePath);
+        }
+        // Cloudinary download
+        const signedUrl = await this.getSignedUrl(storageKey, provider);
+        const https = await Promise.resolve().then(() => __importStar(require('https')));
+        const http = await Promise.resolve().then(() => __importStar(require('http')));
+        const client = signedUrl.startsWith('https') ? https : http;
+        return new Promise((resolve, reject) => {
+            client
+                .get(signedUrl, (res) => {
+                if (res.statusCode && res.statusCode >= 400) {
+                    return reject(new Error(`Failed to fetch file from Cloudinary (HTTP ${res.statusCode})`));
+                }
+                const chunks = [];
+                res.on('data', (chunk) => chunks.push(chunk));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+                res.on('error', reject);
+            })
+                .on('error', reject);
+        });
     }
     static storeLocally(localPath, originalName) {
         const fileName = path_1.default.basename(localPath);
@@ -116,20 +162,27 @@ class StorageService {
         });
     }
     static async delete(storageKey, provider) {
-        if (provider === 'local') {
-            const filePath = path_1.default.resolve(process.cwd(), storageKey);
-            if (fs_1.default.existsSync(filePath)) {
-                fs_1.default.unlinkSync(filePath);
+        try {
+            if (provider === 'local') {
+                const filePath = path_1.default.resolve(process.cwd(), storageKey);
+                if (fs_1.default.existsSync(filePath)) {
+                    fs_1.default.unlinkSync(filePath);
+                }
+                return;
             }
-            return;
+            if (provider === 'cloudinary') {
+                const cloudinary = await Promise.resolve().then(() => __importStar(require('cloudinary')));
+                cloudinary.v2.config({
+                    cloud_name: env_1.env.CLOUDINARY_CLOUD_NAME,
+                    api_key: env_1.env.CLOUDINARY_API_KEY,
+                    api_secret: env_1.env.CLOUDINARY_API_SECRET,
+                });
+                await cloudinary.v2.uploader.destroy(storageKey, { resource_type: 'raw' });
+            }
         }
-        const cloudinary = await Promise.resolve().then(() => __importStar(require('cloudinary')));
-        cloudinary.v2.config({
-            cloud_name: env_1.env.CLOUDINARY_CLOUD_NAME,
-            api_key: env_1.env.CLOUDINARY_API_KEY,
-            api_secret: env_1.env.CLOUDINARY_API_SECRET,
-        });
-        await cloudinary.v2.uploader.destroy(storageKey, { resource_type: 'raw' });
+        catch (err) {
+            console.warn(`[StorageService] Delete failed for ${storageKey} (${provider}):`, err?.message);
+        }
     }
 }
 exports.StorageService = StorageService;

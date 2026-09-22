@@ -7,7 +7,7 @@ export interface CashfreeCustomerDetails {
 export interface CashfreeOrderMeta {
     return_url: string;
     notify_url: string;
-    payment_methods: string;
+    payment_methods?: string;
 }
 export interface CreateCashfreeOrderParams {
     orderId: string;

@@ -5,6 +5,10 @@ import { PrintConfig, PriceSnapshot, PriceBreakdown } from '../types';
  */
 export declare function parsePageRanges(pageRanges: string, totalDocPages: number): number;
 /**
+ * Extract sorted unique 1-indexed page numbers from a range string
+ */
+export declare function extractPageNumbers(pageRanges: string, totalDocPages: number): number[];
+/**
  * Backend price calculation — single source of truth.
  * Frontend can show an estimate but this is authoritative.
  */

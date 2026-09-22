@@ -397,7 +397,13 @@ const OrderDetailPage: React.FC = () => {
         <h3 style={{ margin: '0 0 1rem', fontSize: '0.9rem', fontWeight: 600 }}>Print Details</h3>
         {[
           { label: 'Document', value: doc?.originalName ?? 'N/A' },
-          { label: 'Pages', value: `${job.printConfig.totalPages} pages (${job.printConfig.pageRanges})` },
+          {
+            label: 'Pages',
+            value:
+              job.printConfig.pageRanges !== 'all'
+                ? `${job.printConfig.totalPages} pages (custom: ${job.printConfig.pageRanges})`
+                : `${job.printConfig.totalPages} pages (All)`,
+          },
           { label: 'Copies', value: job.printConfig.copies },
           { label: 'Color', value: job.printConfig.colorMode === 'BW' ? 'Black & White' : 'Color' },
           { label: 'Sides', value: job.printConfig.sides === 'SINGLE' ? 'Single-sided' : 'Double-sided' },
